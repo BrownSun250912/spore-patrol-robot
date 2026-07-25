@@ -1,0 +1,318 @@
+孢子病害巡检机器人——三位组员项目协作与任务说明
+================================================
+
+一、项目和仓库
+--------------
+
+项目目标：
+在现有WHEELTEC C50X四驱底盘和STM32下位机基础上，完成机器人定位建图、
+路径规划、避障、任务点停车和采样模块协同。
+
+GitHub仓库：
+https://github.com/BrownSun250912/spore-patrol-robot
+
+仓库目前为公开仓库。没有GitHub账号也可以查看代码、下载ZIP、git clone和
+git pull；但是如果要git push、创建Pull Request、领取Issue或者提交代码，
+仍然必须注册GitHub账号。
+
+希望三位组员尽快注册免费GitHub账号，并把用户名发给组长，由组长添加为
+Collaborator。没有账号只能临时下载和测试，不能形成规范的GitHub协作记录。
+
+
+二、第一次下载项目
+------------------
+
+Ubuntu终端执行：
+
+git clone https://github.com/BrownSun250912/spore-patrol-robot.git
+cd spore-patrol-robot
+
+配置自己的提交身份：
+
+git config user.name "自己的GitHub用户名或姓名"
+git config user.email "自己的GitHub邮箱"
+
+编译项目：
+
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+
+启动Gazebo演示：
+
+ros2 launch spore_patrol_bringup demo.launch.py
+
+只启动RViz机器人模型：
+
+ros2 launch spore_patrol_description display.launch.py
+
+第一次任务：
+每个人必须独立完成克隆、编译和启动，并把成功截图或错误日志发到群里。
+不要只回复“环境装好了”或者“正在学习”。
+
+
+三、三人具体分工
+--------------
+
+组员一：激光雷达、建图与障碍物感知
+
+建议分支：
+feature/lidar
+
+当前任务：
+1. 对比至少三个室外二维激光雷达型号；
+2. 记录量程、强光性能、防护等级、接口、供电、ROS 2 Humble驱动和价格；
+3. 确认能否借到雷达实物；
+4. 在ROS 2中发布标准/scan话题；
+5. 在RViz中显示雷达数据；
+6. 测量/scan实际发布频率；
+7. 记录雷达安装高度、方向和相对base_link的位置；
+8. 后续接入slam_toolbox完成二维建图。
+
+第一阶段交付：
+- 雷达选型表；
+- ROS 2驱动和启动文件；
+- RViz截图；
+- ros2 topic hz /scan结果；
+- 一段rosbag或测试视频；
+- 一份运行说明。
+
+
+组员二：北斗RTK、航向与融合定位准备
+
+建议分支：
+feature/gnss
+
+当前任务：
+1. 确认学校、试验田或比赛场地能否使用CORS/NTRIP；
+2. 对比至少三个支持北斗多频RTK的接收机或开发板；
+3. 对比单天线定位、双天线定位定向、自建基站三种方案；
+4. 写清移动站、基站、天线、馈线、4G/NTRIP和供电需求；
+5. 确认设备能输出NMEA、RTCM和RTK状态；
+6. 找一段NMEA样例数据并解析；
+7. 在ROS 2中发布/gps/fix；
+8. 规划/gps/heading和/gps/rtk_status话题；
+9. 后续配合robot_localization完成轮速、IMU、RTK和SLAM融合。
+
+第一阶段交付：
+- 北斗RTK选型表；
+- CORS/NTRIP可用性结论；
+- 自建基站和使用CORS两套方案；
+- NMEA原始样例；
+- /gps/fix运行截图；
+- RTK Single、Float、Fix状态说明；
+- 一份运行说明。
+
+
+组员三：底盘硬件测试、电源和结构
+
+建议分支：
+feature/chassis-hardware
+
+当前任务：
+1. 测量轮径、左右轮中心距、前后轮中心距和整车尺寸；
+2. 确认A/B/C/D分别对应哪个车轮；
+3. 记录正向命令时电机方向和编码器正负；
+4. 确认STM32硬件版本、固件版本、串口接口和波特率；
+5. 完成架空轮前进、后退、左转、右转测试；
+6. 完成通信中断自动停车测试；
+7. 测量电池电压、传感器供电和可用功率；
+8. 绘制底盘、电源、急停、雷达、北斗和电脑接线图；
+9. 整理雷达、RTK、支架、DC-DC、急停、线束和保险等物料表。
+
+测试说明：
+tests/README.md
+
+测试主程序：
+tests/chassis_serial/chassis_serial_test.py
+
+第一阶段交付：
+- 底盘参数表；
+- A/B/C/D车轮对应表；
+- 接口和接线照片；
+- 架空轮测试视频；
+- 原始串口数据和frames.csv；
+- 失联停车结果；
+- 电源与物料清单。
+
+
+四、正式GitHub协作流程
+--------------------
+
+重要原则：
+每个人只在自己的功能分支开发，不直接修改或推送main。
+
+1. 开始任务前同步main
+
+git switch main
+git pull --ff-only origin main
+
+2. 从最新main创建自己的分支
+
+雷达负责人：
+git switch -c feature/lidar
+
+北斗负责人：
+git switch -c feature/gnss
+
+硬件负责人：
+git switch -c feature/chassis-hardware
+
+如果分支已经存在，不要重复创建，使用：
+
+git switch feature/lidar
+
+3. 修改前查看状态
+
+git status
+
+4. 完成一小项任务后提交
+
+不要无脑git add .，优先只添加自己修改的文件，例如：
+
+git add src/spore_patrol_lidar
+git add docs/lidar_selection.md
+
+提交：
+
+git commit -m "feat(lidar): add lidar selection and launch"
+
+5. 推送自己的分支
+
+第一次：
+
+git push -u origin feature/lidar
+
+以后：
+
+git push
+
+6. 在GitHub创建Pull Request
+
+base选择main；
+compare选择自己的feature分支；
+写清做了什么、怎么运行、如何测试、目前有什么问题；
+附上截图、日志或视频；
+提交后通知组长检查；
+未经检查不要自行合并。
+
+
+五、开发中如何同步别人已经合并的代码
+----------------------------------
+
+先提交或保存自己的修改，然后：
+
+git fetch origin
+git switch 自己的功能分支
+git merge origin/main
+
+出现冲突时不要删除别人的文件，也不要使用强制推送。把冲突文件和终端信息
+发给组长，一起解决。
+
+不建议初学阶段使用：
+
+git push --force
+git reset --hard
+git rebase
+
+
+六、Pull Request合并之后
+-----------------------
+
+更新本地main：
+
+git switch main
+git pull --ff-only origin main
+
+确认功能分支已经合并后，可以删除本地旧分支：
+
+git branch -d feature/lidar
+
+下一项工作从最新main重新建立分支，不要在已经合并的旧分支无限追加任务。
+
+
+七、没有GitHub账号时的临时办法
+----------------------------
+
+没有账号可以执行：
+
+git clone https://github.com/BrownSun250912/spore-patrol-robot.git
+cd spore-patrol-robot
+git pull --ff-only origin main
+
+也可以下载ZIP、编译、运行和填写测试记录。
+
+但是没有账号不能：
+- 向仓库git push；
+- 创建Pull Request；
+- 领取和关闭Issue；
+- 留下可追溯的代码贡献记录。
+
+临时情况下可以把修改文件、测试记录和日志交给组长，由组长代为检查和提交。
+这只作为过渡方案。长期协作必须注册GitHub账号。
+
+
+八、每天的进度和验收要求
+----------------------
+
+每天至少提交一种可以检查的成果：
+- Git提交或Pull Request；
+- 参数表或选型表；
+- 接线图；
+- 截图；
+- 原始数据；
+- 测试视频；
+- 可复现的运行命令。
+
+“正在学习”“正在看资料”“基本完成”不算交付。
+
+每天汇报格式：
+
+今天完成：
+1.
+2.
+
+文件或分支：
+
+运行/测试命令：
+
+测试结果：
+
+遇到的问题：
+
+明天计划：
+
+
+九、公开仓库安全要求
+------------------
+
+当前仓库任何人都能看到，因此禁止上传：
+- GitHub Token、密码、SSH私钥和账号凭据；
+- Wi-Fi密码、CORS/NTRIP账号密码和SIM卡信息；
+- 个人身份证、手机号、家庭地址等隐私；
+- 未经允许的企业保密文件和完整商业资料；
+- 不应公开的精确试验场坐标；
+- 大型build、install、log目录；
+- 来源不清楚、没有授权公开的代码。
+
+发现密钥或密码已经提交时，不要只删除文件，必须立即通知组长并更换凭据。
+
+
+十、共同目标
+------------
+
+当前第一阶段不是立刻实现完整自主导航，而是分别打通：
+
+底盘：
+电脑命令 -> STM32 -> 四轮运动 -> 编码器/IMU反馈 -> 失联停车
+
+雷达：
+雷达 -> ROS 2 /scan -> RViz -> SLAM地图
+
+北斗：
+RTK接收机 -> NMEA/RTCM -> /gps/fix和航向 -> RTK Fix
+
+三条链路分别通过后，再统一进行轮速、IMU、RTK和激光SLAM融合，最后接入
+Nav2路径规划和孢子采样任务状态机。
+
+有问题时请提交完整命令、完整报错、相关文件和截图，不要只说“运行不了”。
