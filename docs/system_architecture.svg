@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="1" stop-color="#10263a"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" x2="1">
+      <stop offset="0" stop-color="#ff9d2e"/>
+      <stop offset="1" stop-color="#f05a28"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity=".32"/>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#69d3ff"/>
+    </marker>
+    <style>
+      .title { font: 700 42px sans-serif; fill: #f6fbff; }
+      .subtitle { font: 400 21px sans-serif; fill: #9cc7db; }
+      .box-title { font: 700 25px sans-serif; fill: #fff; }
+      .box-text { font: 400 18px sans-serif; fill: #d7edf7; }
+      .small { font: 400 16px sans-serif; fill: #9cc7db; }
+      .line { stroke: #69d3ff; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <circle cx="1430" cy="110" r="220" fill="#1b5e78" opacity=".18"/>
+  <circle cx="90" cy="820" r="270" fill="#ff8a2b" opacity=".08"/>
+
+  <text x="80" y="75" class="title">孢子病害智能巡检机器人 · 导航系统架构</text>
+  <text x="82" y="112" class="subtitle">北斗 RTK + 激光 SLAM + 四驱底盘 + 到点采样闭环</text>
+
+  <g filter="url(#shadow)">
+    <rect x="90" y="175" width="355" height="180" rx="24" fill="#173b51" stroke="#3b7997" stroke-width="2"/>
+    <text x="125" y="220" class="box-title">监管与演示端</text>
+    <text x="125" y="258" class="box-text">• 地图划区 / 采样点配置</text>
+    <text x="125" y="291" class="box-text">• 任务进度 / 视频 / 告警</text>
+    <text x="125" y="324" class="box-text">• 轨迹、样本与病害热力图</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="620" y="155" width="470" height="250" rx="28" fill="#12415a" stroke="#61c9ed" stroke-width="3"/>
+    <rect x="620" y="155" width="470" height="62" rx="28" fill="url(#orange)"/>
+    <text x="660" y="197" class="box-title">ROS 2 随车计算机</text>
+    <text x="660" y="255" class="box-text">任务状态机：导航 → 停车 → 采样 → 确认</text>
+    <text x="660" y="293" class="box-text">田间覆盖路径 / Nav2 / 电子围栏 / 避障</text>
+    <text x="660" y="331" class="box-text">RTK、轮速、IMU、激光 SLAM 融合定位</text>
+    <text x="660" y="369" class="box-text">日志、指标计算、远程状态与视频回传</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1225" y="175" width="285" height="180" rx="24" fill="#173b51" stroke="#3b7997" stroke-width="2"/>
+    <text x="1260" y="220" class="box-title">环境感知</text>
+    <text x="1260" y="258" class="box-text">• 2D / 3D 激光雷达</text>
+    <text x="1260" y="291" class="box-text">• 深度相机 / 视频</text>
+    <text x="1260" y="324" class="box-text">• 北斗 RTK / 双天线</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="570" y="520" width="395" height="210" rx="26" fill="#232f3d" stroke="#f28a38" stroke-width="3"/>
+    <text x="610" y="570" class="box-title">STM32F407 下位机</text>
+    <text x="610" y="610" class="box-text">• 100 Hz 四轮 PI 速度闭环</text>
+    <text x="610" y="644" class="box-text">• 编码器 / IMU / 电压状态</text>
+    <text x="610" y="678" class="box-text">• UART / CAN / RS485</text>
+    <text x="610" y="712" class="box-text">• 急停与失联约 1 秒强制停车</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="105" y="540" width="330" height="180" rx="24" fill="#183b34" stroke="#65c897" stroke-width="2"/>
+    <text x="145" y="590" class="box-title">孢子采集 / PCR 模块</text>
+    <text x="145" y="630" class="box-text">START · BUSY · DONE · ERROR</text>
+    <text x="145" y="666" class="box-text">样本编号 + 实际位姿 + 时间戳</text>
+    <text x="145" y="702" class="small">本组负责承载、触发、联锁和位置绑定</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1090" y="535" width="410" height="200" rx="24" fill="#3d291c" stroke="#d89044" stroke-width="2"/>
+    <text x="1130" y="585" class="box-title">C50X 四驱滑移转向底盘</text>
+    <text x="1130" y="625" class="box-text">四电机 + 四编码器 + 轮胎 / 悬挂</text>
+    <text x="1130" y="660" class="box-text">控制量：Vx、Vz（禁止横向 Vy）</text>
+    <text x="1130" y="695" class="box-text">实车标定：轮径、等效轮距、制动距离</text>
+  </g>
+
+  <path class="line" d="M445 265 C515 265 545 260 620 260"/>
+  <text x="470" y="245" class="small">Wi‑Fi / 4G / 5G</text>
+  <path class="line" d="M1225 265 C1170 265 1145 275 1090 275"/>
+  <path class="line" d="M850 405 L800 520"/>
+  <text x="835" y="465" class="small">cmd_vel / odom / IMU</text>
+  <path class="line" d="M965 625 L1090 625"/>
+  <path class="line" d="M570 625 L435 625"/>
+
+  <rect x="90" y="802" width="1420" height="3" fill="#31546a"/>
+  <text x="90" y="846" class="subtitle">本周最小闭环：ROS 2 仿真可视化 → STM32通信 → 架空轮安全测试 → 实车里程计</text>
+</svg>
