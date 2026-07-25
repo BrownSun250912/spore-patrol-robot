@@ -83,6 +83,28 @@ source install/setup.bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
+## STM32底盘现场测试
+
+`tests/` 中提供不依赖ROS 2和第三方Python包的串口测试工具，包括：
+
+- 串口设备查找和只读监听；
+- 24字节底盘状态帧解析与CSV记录；
+- 低速单项运动和四方向架空轮序列；
+- 连续停车帧和通信失联停车测试；
+- 不连接真实底盘的伪STM32串口模拟器；
+- 现场测试记录模板。
+
+开始前完整阅读：
+
+[底盘测试操作说明](tests/README.md)
+
+离线验证：
+
+```bash
+python3 -m unittest -v tests/chassis_serial/test_protocol.py
+python3 tests/chassis_serial/chassis_serial_test.py selftest
+```
+
 ## 工作区规划
 
 ```text

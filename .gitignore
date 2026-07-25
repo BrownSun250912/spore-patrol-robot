@@ -7,4 +7,5 @@ log/
 __pycache__/
 *.bag
 *.db3
-
+tests/results/*
+!tests/results/.gitkeep
