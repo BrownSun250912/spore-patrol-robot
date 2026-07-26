@@ -12,16 +12,16 @@ from rclpy.node import Node
 from sensor_msgs.msg import BatteryState, Imu
 from tf2_ros import TransformBroadcaster
 
+from .motion_limits import clamp, move_toward
 from .odometry import PlanarOdometry
-from .protocol import StatusFrame, StatusStreamDecoder, build_command_frame
+from .protocol import (
+    StatusFrame,
+    StatusStreamDecoder,
+    accel_raw_to_mps2,
+    build_command_frame,
+    gyro_raw_to_radps,
+)
 from .serial_transport import LinuxSerialPort
-
-
-GRAVITY_MPS2 = 9.80665
-
-
-def clamp(value: float, lower: float, upper: float) -> float:
-    return max(lower, min(upper, value))
 
 
 def yaw_quaternion(yaw: float) -> Tuple[float, float, float, float]:
@@ -42,6 +42,10 @@ class BaseDriverNode(Node):
         self.declare_parameter("feedback_timeout_s", 0.50)
         self.declare_parameter("max_linear_mps", 0.15)
         self.declare_parameter("max_angular_radps", 0.30)
+        self.declare_parameter("max_linear_accel_mps2", 0.40)
+        self.declare_parameter("max_angular_accel_radps2", 0.80)
+        self.declare_parameter("battery_warn_voltage", 21.0)
+        self.declare_parameter("battery_error_voltage", 20.0)
         self.declare_parameter("use_feedback_vy", False)
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_imu", True)
@@ -68,6 +72,18 @@ class BaseDriverNode(Node):
         self.max_angular_radps = float(
             self.get_parameter("max_angular_radps").value
         )
+        self.max_linear_accel_mps2 = float(
+            self.get_parameter("max_linear_accel_mps2").value
+        )
+        self.max_angular_accel_radps2 = float(
+            self.get_parameter("max_angular_accel_radps2").value
+        )
+        self.battery_warn_voltage = float(
+            self.get_parameter("battery_warn_voltage").value
+        )
+        self.battery_error_voltage = float(
+            self.get_parameter("battery_error_voltage").value
+        )
         self.use_feedback_vy = bool(
             self.get_parameter("use_feedback_vy").value
         )
@@ -93,6 +109,22 @@ class BaseDriverNode(Node):
             raise ValueError("command_rate_hz must be positive")
         if self.cmd_vel_timeout_s <= 0.0:
             raise ValueError("cmd_vel_timeout_s must be positive")
+        if self.max_linear_mps <= 0.0 or self.max_angular_radps <= 0.0:
+            raise ValueError("velocity limits must be positive")
+        if (
+            self.max_linear_accel_mps2 <= 0.0
+            or self.max_angular_accel_radps2 <= 0.0
+        ):
+            raise ValueError("acceleration limits must be positive")
+        if not (
+            0.0
+            < self.battery_error_voltage
+            < self.battery_warn_voltage
+        ):
+            raise ValueError(
+                "battery thresholds must satisfy "
+                "0 < error voltage < warning voltage"
+            )
         if self.accel_lsb_per_g <= 0.0:
             raise ValueError("accel_lsb_per_g must be positive")
         if self.gyro_lsb_per_deg_s <= 0.0:
@@ -103,7 +135,9 @@ class BaseDriverNode(Node):
         self.planar_odom = PlanarOdometry()
         self.latest_status: Optional[StatusFrame] = None
         self.requested_velocity = (0.0, 0.0)
+        self.sent_velocity = (0.0, 0.0)
         self.last_cmd_vel_wall: Optional[float] = None
+        self.last_command_send_wall: Optional[float] = None
         self.last_feedback_wall: Optional[float] = None
         self.last_feedback_batch_wall: Optional[float] = None
         self.serial_opened_wall: Optional[float] = None
@@ -172,6 +206,8 @@ class BaseDriverNode(Node):
         self.last_feedback_batch_wall = None
         self.serial_opened_wall = now
         self.next_command_wall = now
+        self.sent_velocity = (0.0, 0.0)
+        self.last_command_send_wall = None
         self.get_logger().info(f"Opened STM32 serial port {self.port_name}")
 
     def _disconnect(self, reason: str) -> None:
@@ -182,6 +218,8 @@ class BaseDriverNode(Node):
                 pass
         self.transport = None
         self.serial_opened_wall = None
+        self.sent_velocity = (0.0, 0.0)
+        self.last_command_send_wall = None
         self.next_reconnect_wall = time.monotonic() + 1.0
         if not self.shutting_down:
             self.get_logger().error(f"STM32 serial connection lost: {reason}")
@@ -193,6 +231,42 @@ class BaseDriverNode(Node):
         ):
             return 0.0, 0.0
         return self.requested_velocity
+
+    def _command_for_send(self, now: float) -> Tuple[float, float]:
+        command_is_stale = (
+            self.last_cmd_vel_wall is None
+            or now - self.last_cmd_vel_wall > self.cmd_vel_timeout_s
+        )
+        if command_is_stale:
+            # A watchdog stop bypasses the normal acceleration ramp.
+            self.sent_velocity = (0.0, 0.0)
+            self.last_command_send_wall = now
+            return self.sent_velocity
+
+        if self.last_command_send_wall is None:
+            dt = 1.0 / self.command_rate_hz
+        else:
+            dt = clamp(
+                now - self.last_command_send_wall,
+                0.0,
+                2.0 / self.command_rate_hz,
+            )
+        desired_vx, desired_wz = self._active_command(now)
+        sent_vx, sent_wz = self.sent_velocity
+        self.sent_velocity = (
+            move_toward(
+                sent_vx,
+                desired_vx,
+                self.max_linear_accel_mps2 * dt,
+            ),
+            move_toward(
+                sent_wz,
+                desired_wz,
+                self.max_angular_accel_radps2 * dt,
+            ),
+        )
+        self.last_command_send_wall = now
+        return self.sent_velocity
 
     def _io_callback(self) -> None:
         now = time.monotonic()
@@ -208,7 +282,7 @@ class BaseDriverNode(Node):
                     self._process_feedback_batch(frames, now)
 
             if now >= self.next_command_wall:
-                vx, wz = self._active_command(now)
+                vx, wz = self._command_for_send(now)
                 self.transport.write(build_command_frame(vx, 0.0, wz))
                 self.next_command_wall = now + 1.0 / self.command_rate_hz
 
@@ -303,16 +377,24 @@ class BaseDriverNode(Node):
             imu.header.stamp = stamp
             imu.header.frame_id = self.imu_frame_id
             imu.orientation_covariance[0] = -1.0
-            gyro_scale = (
-                math.pi / 180.0 / self.gyro_lsb_per_deg_s
+            imu.angular_velocity.x = gyro_raw_to_radps(
+                frame.gyro_x_raw, self.gyro_lsb_per_deg_s
             )
-            accel_scale = GRAVITY_MPS2 / self.accel_lsb_per_g
-            imu.angular_velocity.x = frame.gyro_x_raw * gyro_scale
-            imu.angular_velocity.y = frame.gyro_y_raw * gyro_scale
-            imu.angular_velocity.z = frame.gyro_z_raw * gyro_scale
-            imu.linear_acceleration.x = frame.accel_x_raw * accel_scale
-            imu.linear_acceleration.y = frame.accel_y_raw * accel_scale
-            imu.linear_acceleration.z = frame.accel_z_raw * accel_scale
+            imu.angular_velocity.y = gyro_raw_to_radps(
+                frame.gyro_y_raw, self.gyro_lsb_per_deg_s
+            )
+            imu.angular_velocity.z = gyro_raw_to_radps(
+                frame.gyro_z_raw, self.gyro_lsb_per_deg_s
+            )
+            imu.linear_acceleration.x = accel_raw_to_mps2(
+                frame.accel_x_raw, self.accel_lsb_per_g
+            )
+            imu.linear_acceleration.y = accel_raw_to_mps2(
+                frame.accel_y_raw, self.accel_lsb_per_g
+            )
+            imu.linear_acceleration.z = accel_raw_to_mps2(
+                frame.accel_z_raw, self.accel_lsb_per_g
+            )
             imu.angular_velocity_covariance = [
                 0.02, 0.0, 0.0,
                 0.0, 0.02, 0.0,
@@ -368,6 +450,18 @@ class BaseDriverNode(Node):
         elif feedback_age > self.feedback_timeout_s:
             status.level = DiagnosticStatus.ERROR
             status.message = "feedback stale"
+        elif (
+            self.latest_status is not None
+            and self.latest_status.battery_v <= self.battery_error_voltage
+        ):
+            status.level = DiagnosticStatus.ERROR
+            status.message = "battery voltage critical"
+        elif (
+            self.latest_status is not None
+            and self.latest_status.battery_v <= self.battery_warn_voltage
+        ):
+            status.level = DiagnosticStatus.WARN
+            status.message = "battery voltage low"
         elif self.latest_status is not None and self.latest_status.flag_stop:
             status.level = DiagnosticStatus.WARN
             status.message = "motor control disabled"
@@ -384,6 +478,16 @@ class BaseDriverNode(Node):
                 "inf" if math.isinf(command_age) else f"{command_age:.3f}"
             ),
             "host_cmd_timeout_s": f"{self.cmd_vel_timeout_s:.3f}",
+            "requested_vx_mps": f"{self.requested_velocity[0]:.3f}",
+            "requested_wz_radps": f"{self.requested_velocity[1]:.3f}",
+            "sent_vx_mps": f"{self.sent_velocity[0]:.3f}",
+            "sent_wz_radps": f"{self.sent_velocity[1]:.3f}",
+            "max_linear_accel_mps2": (
+                f"{self.max_linear_accel_mps2:.3f}"
+            ),
+            "max_angular_accel_radps2": (
+                f"{self.max_angular_accel_radps2:.3f}"
+            ),
             "discarded_serial_bytes": str(self.decoder.discarded_bytes),
             "invalid_frame_candidates": str(
                 self.decoder.invalid_candidates

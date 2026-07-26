@@ -18,12 +18,20 @@ import time
 from typing import Callable, Iterable, Optional
 
 try:
-    from protocol import StatusFrame, StatusStreamDecoder, build_command_frame
+    from protocol import (
+        StatusFrame,
+        StatusStreamDecoder,
+        accel_raw_to_mps2,
+        build_command_frame,
+        gyro_raw_to_radps,
+    )
 except ImportError:
     from tests.chassis_serial.protocol import (
         StatusFrame,
         StatusStreamDecoder,
+        accel_raw_to_mps2,
         build_command_frame,
+        gyro_raw_to_radps,
     )
 
 
@@ -120,16 +128,28 @@ class CaptureSession:
         "vx_mps",
         "vy_mps",
         "wz_radps",
-        "accel_x",
-        "accel_y",
-        "accel_z",
-        "gyro_x",
-        "gyro_y",
-        "gyro_z",
+        "accel_x_raw",
+        "accel_y_raw",
+        "accel_z_raw",
+        "gyro_x_raw",
+        "gyro_y_raw",
+        "gyro_z_raw",
+        "accel_x_mps2",
+        "accel_y_mps2",
+        "accel_z_mps2",
+        "gyro_x_radps",
+        "gyro_y_radps",
+        "gyro_z_radps",
         "battery_v",
     )
 
-    def __init__(self, command: str, device: str, baud: int) -> None:
+    def __init__(
+        self,
+        command: str,
+        device: str,
+        baud: int,
+        parameters: dict,
+    ) -> None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         self.path = RESULTS_ROOT / f"{timestamp}_{command}"
         self.path.mkdir(parents=True, exist_ok=False)
@@ -141,14 +161,18 @@ class CaptureSession:
         self.started = time.monotonic()
         self.frame_count = 0
         self.latest: Optional[StatusFrame] = None
-        metadata = {
+        self.metadata = {
             "command": command,
             "device": device,
             "baud": baud,
             "started_at": datetime.now().isoformat(timespec="seconds"),
+            "parameters": parameters,
         }
-        (self.path / "metadata.json").write_text(
-            json.dumps(metadata, indent=2, ensure_ascii=False) + "\n",
+        self._write_json("metadata.json", self.metadata)
+
+    def _write_json(self, filename: str, value: dict) -> None:
+        (self.path / filename).write_text(
+            json.dumps(value, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
 
@@ -159,7 +183,16 @@ class CaptureSession:
         rows = []
         for status in self.decoder.feed(data):
             elapsed = time.monotonic() - self.started
-            row = {"elapsed_s": f"{elapsed:.6f}", **status.__dict__}
+            row = {
+                "elapsed_s": f"{elapsed:.6f}",
+                **status.__dict__,
+                "accel_x_mps2": accel_raw_to_mps2(status.accel_x_raw),
+                "accel_y_mps2": accel_raw_to_mps2(status.accel_y_raw),
+                "accel_z_mps2": accel_raw_to_mps2(status.accel_z_raw),
+                "gyro_x_radps": gyro_raw_to_radps(status.gyro_x_raw),
+                "gyro_y_radps": gyro_raw_to_radps(status.gyro_y_raw),
+                "gyro_z_radps": gyro_raw_to_radps(status.gyro_z_raw),
+            }
             self.writer.writerow(row)
             self.frame_count += 1
             self.latest = status
@@ -169,6 +202,27 @@ class CaptureSession:
     def close(self) -> None:
         self.raw_file.close()
         self.csv_file.close()
+
+    def write_summary(
+        self,
+        outcome: str,
+        details: Optional[dict] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        summary = {
+            "command": self.metadata["command"],
+            "outcome": outcome,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "frame_count": self.frame_count,
+            "average_feedback_rate_hz": round(self.frame_rate, 3),
+            "discarded_serial_bytes": self.decoder.discarded_bytes,
+            "invalid_frame_candidates": self.decoder.invalid_candidates,
+        }
+        if details:
+            summary.update(details)
+        if error:
+            summary["error"] = error
+        self._write_json("summary.json", summary)
 
     @property
     def elapsed(self) -> float:
@@ -237,16 +291,19 @@ def drain_feedback(
     duration: float,
     *,
     print_interval: float = 1.0,
-) -> None:
+) -> list[tuple[float, StatusFrame]]:
+    captured_rows: list[tuple[float, StatusFrame]] = []
     deadline = time.monotonic() + duration
     next_print = time.monotonic()
     while time.monotonic() < deadline:
         rows = capture.feed(port.read(timeout=0.05))
+        captured_rows.extend(rows)
         now = time.monotonic()
         if rows and now >= next_print:
             _, status = rows[-1]
             print_status(status, capture.frame_rate)
             next_print = now + print_interval
+    return captured_rows
 
 
 def print_status(status: StatusFrame, rate: float) -> None:
@@ -287,15 +344,42 @@ def run_velocity(
 def with_port_and_capture(
     args: argparse.Namespace,
     command: str,
-    operation: Callable[[LinuxSerialPort, CaptureSession], None],
+    operation: Callable[
+        [LinuxSerialPort, CaptureSession],
+        Optional[dict],
+    ],
 ) -> None:
     capture: Optional[CaptureSession] = None
     try:
         with LinuxSerialPort(args.port, args.baud) as port:
-            capture = CaptureSession(command, args.port, args.baud)
+            parameters = {
+                key: value
+                for key, value in vars(args).items()
+                if key not in {"func", "arm", "command", "port", "baud"}
+            }
+            capture = CaptureSession(
+                command,
+                args.port,
+                args.baud,
+                parameters,
+            )
             print(f"Opened {args.port} at {args.baud} baud")
             print(f"Results: {capture.path}")
-            operation(port, capture)
+            try:
+                details = operation(port, capture)
+            except BaseException as exc:
+                outcome = (
+                    "interrupted"
+                    if isinstance(exc, KeyboardInterrupt)
+                    else "error"
+                )
+                capture.write_summary(
+                    outcome,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
+            else:
+                capture.write_summary("completed", details)
     except PermissionError as exc:
         raise SystemExit(
             f"Permission denied opening {args.port}. "
@@ -415,7 +499,7 @@ def command_distance(args: argparse.Namespace) -> None:
         raise SystemExit(f"Refusing distance test: pass --arm {DISTANCE_ARM_TEXT}")
     require_safe_distance(args.distance, args.speed)
 
-    def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+    def operation(port: LinuxSerialPort, capture: CaptureSession) -> dict:
         send_stop_burst(port)
         drain_feedback(port, capture, 0.5, print_interval=0.5)
         if capture.latest is None:
@@ -450,6 +534,7 @@ def command_distance(args: argparse.Namespace) -> None:
         last_feedback_wall = time.monotonic()
         last_frame_elapsed: Optional[float] = None
         integrated_distance = 0.0
+        distance_at_stop_command = 0.0
 
         try:
             while integrated_distance < args.distance:
@@ -492,15 +577,52 @@ def command_distance(args: argparse.Namespace) -> None:
                     raise TimeoutError(
                         "lost chassis feedback for more than 0.5 s"
                     )
+            distance_at_stop_command = integrated_distance
         finally:
             send_stop_burst(port)
-            drain_feedback(port, capture, 0.8, print_interval=0.4)
+            settling_rows = drain_feedback(
+                port,
+                capture,
+                0.8,
+                print_interval=0.4,
+            )
+            for elapsed, status in settling_rows:
+                if last_frame_elapsed is not None:
+                    dt = elapsed - last_frame_elapsed
+                    if 0 < dt <= 0.25:
+                        integrated_distance += max(
+                            0.0,
+                            status.vx_mps,
+                        ) * dt
+                last_frame_elapsed = elapsed
             print("Distance-test stop burst sent.")
 
+        coast_distance = max(
+            0.0,
+            integrated_distance - distance_at_stop_command,
+        )
         print(
-            f"Encoder-integrated target reached: {integrated_distance:.3f} m. "
+            "Encoder-integrated target reached: "
+            f"{distance_at_stop_command:.3f} m; "
+            f"after settling: {integrated_distance:.3f} m "
+            f"(coast {coast_distance:.3f} m). "
             "Measure the physical start-to-stop distance now."
         )
+        return {
+            "test_result": "TARGET_REACHED",
+            "target_distance_m": args.distance,
+            "command_speed_mps": args.speed,
+            "encoder_distance_at_stop_command_m": round(
+                distance_at_stop_command,
+                6,
+            ),
+            "encoder_distance_after_settling_m": round(
+                integrated_distance,
+                6,
+            ),
+            "encoder_coast_distance_m": round(coast_distance, 6),
+            "physical_distance_m": None,
+        }
 
     with_port_and_capture(args, "distance", operation)
 
@@ -513,7 +635,7 @@ def command_rotate(args: argparse.Namespace) -> None:
     target_angle_rad = math.radians(args.angle)
     commanded_wz = direction_sign * args.speed
 
-    def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+    def operation(port: LinuxSerialPort, capture: CaptureSession) -> dict:
         send_stop_burst(port)
         drain_feedback(port, capture, 0.5, print_interval=0.5)
         if capture.latest is None:
@@ -548,6 +670,8 @@ def command_rotate(args: argparse.Namespace) -> None:
         last_feedback_wall = time.monotonic()
         last_frame_elapsed: Optional[float] = None
         integrated_angle_rad = 0.0
+        integrated_gyro_angle_rad = 0.0
+        angle_at_stop_command_rad = 0.0
 
         try:
             while integrated_angle_rad < target_angle_rad:
@@ -574,6 +698,13 @@ def command_rotate(args: argparse.Namespace) -> None:
                             if 0 < dt <= 0.25:
                                 signed_wz = direction_sign * status.wz_radps
                                 integrated_angle_rad += max(0.0, signed_wz) * dt
+                                signed_gyro = direction_sign * gyro_raw_to_radps(
+                                    status.gyro_z_raw
+                                )
+                                integrated_gyro_angle_rad += max(
+                                    0.0,
+                                    signed_gyro,
+                                ) * dt
                         last_frame_elapsed = elapsed
 
                     now = time.monotonic()
@@ -590,16 +721,65 @@ def command_rotate(args: argparse.Namespace) -> None:
                     raise TimeoutError(
                         "lost chassis feedback for more than 0.5 s"
                     )
+            angle_at_stop_command_rad = integrated_angle_rad
         finally:
             send_stop_burst(port)
-            drain_feedback(port, capture, 0.8, print_interval=0.4)
+            settling_rows = drain_feedback(
+                port,
+                capture,
+                0.8,
+                print_interval=0.4,
+            )
+            for elapsed, status in settling_rows:
+                if last_frame_elapsed is not None:
+                    dt = elapsed - last_frame_elapsed
+                    if 0 < dt <= 0.25:
+                        signed_wz = direction_sign * status.wz_radps
+                        integrated_angle_rad += max(0.0, signed_wz) * dt
+                        signed_gyro = direction_sign * gyro_raw_to_radps(
+                            status.gyro_z_raw
+                        )
+                        integrated_gyro_angle_rad += max(
+                            0.0,
+                            signed_gyro,
+                        ) * dt
+                last_frame_elapsed = elapsed
             print("Rotation-test stop burst sent.")
 
+        coast_angle_rad = max(
+            0.0,
+            integrated_angle_rad - angle_at_stop_command_rad,
+        )
         print(
             "Wheel-odometry target reached: "
-            f"{math.degrees(integrated_angle_rad):.1f} deg. "
+            f"{math.degrees(angle_at_stop_command_rad):.1f} deg; "
+            f"after settling: {math.degrees(integrated_angle_rad):.1f} deg "
+            f"(coast {math.degrees(coast_angle_rad):.1f} deg). "
             "Measure the physical final heading now."
         )
+        return {
+            "test_result": "TARGET_REACHED",
+            "direction": args.direction,
+            "target_angle_deg": args.angle,
+            "command_speed_radps": args.speed,
+            "wheel_angle_at_stop_command_deg": round(
+                math.degrees(angle_at_stop_command_rad),
+                6,
+            ),
+            "wheel_angle_after_settling_deg": round(
+                math.degrees(integrated_angle_rad),
+                6,
+            ),
+            "wheel_coast_angle_deg": round(
+                math.degrees(coast_angle_rad),
+                6,
+            ),
+            "gyro_angle_after_settling_deg": round(
+                math.degrees(integrated_gyro_angle_rad),
+                6,
+            ),
+            "physical_angle_deg": None,
+        }
 
     with_port_and_capture(args, "rotate", operation)
 
@@ -608,7 +788,7 @@ def command_failsafe(args: argparse.Namespace) -> None:
     if args.arm != FAILSAFE_ARM_TEXT:
         raise SystemExit(f"Refusing failsafe test: pass --arm {FAILSAFE_ARM_TEXT}")
 
-    def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+    def operation(port: LinuxSerialPort, capture: CaptureSession) -> dict:
         drive_duration = 2.0
         silence_duration = 2.0
         moving_vx_threshold = 0.015
@@ -677,12 +857,14 @@ def command_failsafe(args: argparse.Namespace) -> None:
             print("Recovery stop burst sent.")
 
         if not motion_confirmed:
+            test_result = "INCONCLUSIVE"
             print(
                 "INCONCLUSIVE: the chassis was not confirmed moving before "
                 f"command silence (requires |vx| >= {moving_vx_threshold:.3f} m/s "
                 "with stop=0)."
             )
         elif stopped_after is None:
+            test_result = "FAIL"
             print(
                 "FAIL: after confirmed motion, feedback did not remain below the "
                 f"stop threshold for {required_stopped_frames} consecutive frames "
@@ -694,9 +876,23 @@ def command_failsafe(args: argparse.Namespace) -> None:
                 f"after {stopped_after:.3f} s."
             )
             if stopped_after <= 1.2:
+                test_result = "PASS_CANDIDATE"
                 print("PASS candidate: verify the wheel video before accepting.")
             else:
+                test_result = "FAIL"
                 print("FAIL: stop response exceeded the 1.2 s acceptance threshold.")
+        return {
+            "test_result": test_result,
+            "motion_confirmed_before_silence": motion_confirmed,
+            "commanded_speed_mps": 0.03,
+            "command_duration_s": drive_duration,
+            "command_silence_duration_s": silence_duration,
+            "stable_stop_after_s": (
+                None if stopped_after is None else round(stopped_after, 6)
+            ),
+            "acceptance_threshold_s": 1.2,
+            "video_review_required": True,
+        }
 
     with_port_and_capture(args, "failsafe", operation)
 

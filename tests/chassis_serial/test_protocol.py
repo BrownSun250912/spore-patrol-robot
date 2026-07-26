@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import os
+from pathlib import Path
 import pty
 import struct
+import tempfile
 import unittest
 
+from tests.chassis_serial import chassis_serial_test
 from tests.chassis_serial.chassis_serial_test import (
+    CaptureSession,
     LinuxSerialPort,
     require_safe_distance,
     require_safe_rotation,
@@ -51,7 +57,41 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(status.flag_stop, 1)
         self.assertAlmostEqual(status.vx_mps, 0.05)
         self.assertAlmostEqual(status.wz_radps, -0.15)
+        self.assertEqual(status.accel_z_raw, 9800)
+        self.assertEqual(status.gyro_z_raw, 30)
         self.assertAlmostEqual(status.battery_v, 24.5)
+
+    def test_capture_writes_si_columns_and_summary(self) -> None:
+        raw = make_status_frame(
+            (50, 0, 0, 0, 0, 16384, 0, 0, 655, 24000)
+        )
+        old_results_root = chassis_serial_test.RESULTS_ROOT
+        with tempfile.TemporaryDirectory() as temporary:
+            chassis_serial_test.RESULTS_ROOT = Path(temporary)
+            capture = CaptureSession(
+                "listen",
+                "/dev/test",
+                115200,
+                {"duration": 1.0},
+            )
+            try:
+                capture.feed(raw)
+                capture.write_summary("completed", {"test_result": "OK"})
+            finally:
+                capture.close()
+                chassis_serial_test.RESULTS_ROOT = old_results_root
+
+            with (capture.path / "frames.csv").open(newline="") as stream:
+                row = next(csv.DictReader(stream))
+            self.assertEqual(int(row["accel_z_raw"]), 16384)
+            self.assertAlmostEqual(float(row["accel_z_mps2"]), 9.80665)
+            self.assertAlmostEqual(float(row["gyro_z_radps"]), 0.1745329)
+
+            summary = json.loads(
+                (capture.path / "summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(summary["outcome"], "completed")
+            self.assertEqual(summary["test_result"], "OK")
 
     def test_stream_decoder_recovers_after_noise_and_fragmentation(self) -> None:
         raw = make_status_frame((1, 2, 3, 4, 5, 6, 7, 8, 9, 24000))

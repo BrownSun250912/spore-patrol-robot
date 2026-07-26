@@ -1,3 +1,4 @@
+import math
 import struct
 
 import pytest
@@ -6,8 +7,10 @@ from spore_patrol_base_driver.protocol import (
     FRAME_HEADER,
     FRAME_TAIL,
     StatusStreamDecoder,
+    accel_raw_to_mps2,
     bcc,
     build_command_frame,
+    gyro_raw_to_radps,
     parse_status_frame,
 )
 
@@ -41,6 +44,12 @@ def test_status_preserves_raw_imu_counts():
     assert status.accel_z_raw == 16384
     assert status.gyro_y_raw == -20
     assert status.battery_v == pytest.approx(24.15)
+
+
+def test_imu_counts_convert_to_si_units():
+    assert accel_raw_to_mps2(16384) == pytest.approx(9.80665)
+    expected = math.radians(1.0)
+    assert gyro_raw_to_radps(65.5) == pytest.approx(expected)
 
 
 def test_stream_recovers_after_noise_and_fragmentation():

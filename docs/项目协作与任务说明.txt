@@ -35,8 +35,11 @@ git config user.email "自己的GitHub邮箱"
 编译项目：
 
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
+colcon build
 source install/setup.bash
+
+说明：工作区位于ext4文件系统时可以使用--symlink-install；位于/media下的
+NTFS/exFAT挂载盘时统一使用普通colcon build，避免生成不可识别的链接。
 
 启动Gazebo演示：
 

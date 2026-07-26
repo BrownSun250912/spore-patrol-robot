@@ -1,78 +1,130 @@
 # Spore Patrol Robot
 
-面向“基于机器人与 DNA-PCR 技术的孢子病害识别”项目的机器人导航工作区。
+面向“基于机器人与 DNA-PCR 技术的孢子病害识别”项目的 ROS 2 机器人导航工作区。
+本仓库只负责机器人底盘、定位、导航、路径规划和硬件联调；孢子收集及生物检测由其他
+小组负责。
 
-当前目标是在 WHEELTEC C50X 四驱滑移转向底盘和 STM32F407 下位机基础上，逐步实现：
+## 当前状态
 
-- C50X 机器人模型与 ROS 2 坐标系；
-- Gazebo 农田场景和二维激光雷达仿真；
-- STM32 串口/CAN 底盘驱动；
-- 轮速、IMU、北斗 RTK 与激光 SLAM 融合定位；
-- 田间覆盖路径规划、电子围栏和动态避障；
-- “到点—停车—采样—确认—继续”的任务状态机；
-- 运行日志、测试数据和比赛演示材料。
+已确认实车为 WHEELTEC 高配摆式悬挂四驱底盘：
 
-## 当前成果
+- STM32F407 下位机；
+- MD36L-P27 电机，24 V、60 W、1:27 减速比；
+- 500 线 AB 相 GMR 编码器，STM32 四倍频计数；
+- 152 mm 越野轮；
+- 图纸轴距 312.7 mm、轮中心距约 335.6 mm；
+- 裸车质量约 7.6 kg，24 V 6000 mAh 电池。
 
-- `spore_patrol_description`：C50X 四驱底盘简化 Xacro 模型；
-- `spore_patrol_sim`：简化农田世界、激光雷达和可移动机器人；
-- `spore_patrol_base_driver`：真实STM32串口底盘驱动、里程计、IMU、电池与诊断；
-- `spore_patrol_bringup`：统一演示启动入口；
-- `docs/system_architecture.svg`：汇报用系统架构图（同时提供 PNG）；
-- `docs/evening_brief.md`：阶段汇报提纲。
+详细参数及“图纸尺寸”和“固件有效运动学参数”的区别见
+[高配摆式悬挂底盘参数](docs/小车相关参数/README.md)。
 
-> 当前模型采用固件中“顶配摆式悬挂四驱”参数作为临时值：半轮距 0.311 m、半轴距 0.308 m、轮径 0.225 m。拿到实车后必须根据底盘挡位和实测尺寸更新。
+### 已完成
 
-### 可视化结果
+- 高配摆式底盘 Xacro/URDF 模型和 ROS 坐标系；
+- Gazebo Classic 简化农田场景及二维激光雷达仿真；
+- STM32 11 字节速度命令和 24 字节状态反馈协议；
+- ROS 2 串口底盘驱动；
+- `/cmd_vel` 控制、轮式 `/odom`、`odom -> base_footprint` TF；
+- `/imu/data_raw`、`/battery_state` 和 `/diagnostics`；
+- 上位机 0.30 秒命令看门狗、STM32 通信失联停车；
+- 速度和加速度限制、低电压诊断、串口断线重连；
+- 独立串口测试工具、原始字节记录、CSV 和测试摘要；
+- 3 m 直线、原地旋转、四轮动作和失联停车实车测试。
 
-系统总体方案：
+当前实测基线：
 
-![系统总体方案](docs/system_architecture.png)
+- STM32 状态反馈约 20 Hz；
+- 编码器目标 3.000 m 对应卷尺距离约 3.05 m；
+- 90°和 360°原地旋转表现正常，仍需补充重复测量数据；
+- 失联停车已通过一次现场测试，修改或重新烧录固件后必须复测。
 
-机器人 RViz 模型：
+### 尚未完成
 
-![机器人 RViz 模型](docs/rviz_robot_model.png)
+- 实物二维激光雷达接入和室外数据评估；
+- 北斗 RTK、航向和 CORS/NTRIP 链路；
+- `robot_localization` 轮速、IMU、RTK/SLAM 融合；
+- Nav2 建图、定位、规划和动态避障；
+- 田间往复式覆盖路径和电子围栏；
+- “到点—停车—采样—确认—继续”任务状态机；
+- 携带完整载荷后的质量、重心、续航和越障复测。
 
-Gazebo 农田场景：
+## 工作区结构
 
-![Gazebo 农田场景](docs/gazebo_farmland.png)
+```text
+spore_patrol_ws/
+├── src/
+│   ├── spore_patrol_base_driver  STM32协议、串口、里程计、IMU、电池、诊断
+│   ├── spore_patrol_description  高配摆式底盘URDF/Xacro和RViz配置
+│   ├── spore_patrol_sim          Gazebo农田世界及激光雷达仿真
+│   └── spore_patrol_bringup      仿真和实车统一启动入口
+├── tests/
+│   ├── chassis_serial            不依赖ROS运行时的底盘测试程序
+│   ├── results                   现场原始数据和测试结果
+│   └── templates                 测试记录模板
+└── docs/                         参数、协作说明和汇报材料
+```
 
-### 已验证接口
+后续计划增加：
 
-演示启动后已经验证以下 ROS 2 接口可用：
-
-- `/cmd_vel`：底盘速度控制；
-- `/odom`：仿真里程计；
-- `/scan`：二维激光雷达，当前约 9.9 Hz；
-- `/joint_states`、`/tf`、`/tf_static`：机器人关节和坐标变换；
-- `/robot_description`：机器人模型描述。
-
-当前 Gazebo 运动插件用于今晚的系统链路和界面演示，还不代表真实四驱滑移转向动力学，也尚未接入 Nav2 自主导航。
+```text
+spore_patrol_localization  轮速、IMU、RTK和SLAM融合
+spore_patrol_navigation    Nav2规划、控制与避障
+spore_patrol_coverage      田间覆盖路径
+spore_patrol_mission       采样任务状态机
+```
 
 ## 环境
 
 - Ubuntu 22.04
 - ROS 2 Humble
 - Gazebo Classic 11
+- Python 3.10
 
 ## 编译
 
+当前工作区位于 `/media` 外接挂载盘，不要使用 `--symlink-install`：
+
 ```bash
-cd spore_patrol_ws
+cd "/media/brown/新加卷1/STM32_Project/WHEELTEC_C50X_2026.05.29/spore_patrol_ws"
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
+colcon build
 source install/setup.bash
 ```
 
-## RViz 模型展示
+如果工作区以后迁移到 Ubuntu ext4 分区，才建议使用 `--symlink-install`。
+
+离线测试：
 
 ```bash
+python3 -m unittest -v tests/chassis_serial/test_protocol.py
+python3 tests/chassis_serial/chassis_serial_test.py selftest
+```
+
+当前验证结果为：
+
+```text
+ROS 2四个包构建成功
+底盘包colcon测试：8项通过
+全部Python测试：17项通过
+URDF/Xacro解析通过
+```
+
+## 不连接小车查看模型
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
 ros2 launch spore_patrol_description display.launch.py
 ```
 
-## Gazebo 农田演示
+该启动文件会临时发布静态 `odom -> base_footprint`。不要与实车
+`hardware.launch.py` 同时运行，否则会重复发布同一段 TF。
+
+## Gazebo农田演示
 
 ```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
 ros2 launch spore_patrol_bringup demo.launch.py
 ```
 
@@ -84,82 +136,116 @@ source install/setup.bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard
 ```
 
-## STM32底盘现场测试
-
-`tests/` 中提供不依赖ROS 2和第三方Python包的串口测试工具，包括：
-
-- 串口设备查找和只读监听；
-- 24字节底盘状态帧解析与CSV记录；
-- 低速单项运动和四方向架空轮序列；
-- 连续停车帧和通信失联停车测试；
-- 不连接真实底盘的伪STM32串口模拟器；
-- 现场测试记录模板。
-
-开始前完整阅读：
-
-[底盘测试操作说明](tests/README.md)
-
-离线验证：
-
-```bash
-python3 -m unittest -v tests/chassis_serial/test_protocol.py
-python3 tests/chassis_serial/chassis_serial_test.py selftest
-```
+Gazebo 当前使用平面运动插件，只适合展示话题、TF、场景和传感器链路，不代表真实四驱
+滑移转向动力学，也不能作为 Nav2 控制器参数已经验证的依据。
 
 ## 真实底盘ROS 2驱动
 
-固件中 `SYSTEM/sys/sys.c` 的安全等级已经配置为0；重新编译并烧录4WD固件后，STM32会在
-连续丢失控制命令约1秒时清零目标速度。未重新烧录前，实车仍在运行旧固件，不能把源码
-修改视为安全功能已经生效。
+先确认串口：
 
-启动真实底盘、机器人模型和RViz：
+```bash
+python3 tests/chassis_serial/chassis_serial_test.py ports
+```
+
+启动底盘驱动、机器人模型和 RViz：
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install
 source install/setup.bash
-ros2 launch spore_patrol_bringup hardware.launch.py port:=/dev/ttyACM0
+ros2 launch spore_patrol_bringup hardware.launch.py \
+  port:=/dev/ttyACM0 \
+  rviz:=true
 ```
 
-节点接口：
+如果没有连接小车，驱动不会收到状态帧，也不会发布动态
+`odom -> base_footprint`，RViz 会提示 `Frame [odom] does not exist`。这是预期现象，
+不代表 URDF 损坏。
 
-- 订阅 `/cmd_vel`，默认限速 `0.15 m/s`、`0.30 rad/s`；
-- 发布 `/odom` 和动态 `odom -> base_footprint` TF；
-- 发布 `/imu/data_raw`，按固件的±2 g、±500°/s量程转换为ROS SI单位；
-- 发布 `/battery_state` 和 `/diagnostics`；
-- 上位机超过0.30秒没有收到新 `/cmd_vel` 时持续发送零速度；
-- 串口关闭、节点退出或按 `Ctrl+C` 时尝试连续发送停车帧。
+驱动默认参数：
 
-保持四轮架空时，可用一次性低速命令验证：
+| 参数 | 默认值 | 说明 |
+|---|---:|---|
+| 串口 | `/dev/ttyACM0` | 推荐后续配置固定 udev 名称 |
+| 波特率 | 115200 | STM32 ROS 串口 |
+| 发送频率 | 20 Hz | 持续发送速度或停车帧 |
+| 命令超时 | 0.30 s | 超时立即发送零速度 |
+| 最大线速度 | 0.15 m/s | 当前低速联调限制 |
+| 最大角速度 | 0.30 rad/s | 当前低速联调限制 |
+| 最大线加速度 | 0.40 m/s² | 正常控制指令斜坡 |
+| 最大角加速度 | 0.80 rad/s² | 正常控制指令斜坡 |
+| 低电压警告 | 21.0 V | 发布 WARN 诊断 |
+| 严重低电压 | 20.0 V | 发布 ERROR 诊断 |
+
+主要话题：
+
+| 方向 | 话题 | 类型 |
+|---|---|---|
+| 订阅 | `/cmd_vel` | `geometry_msgs/msg/Twist` |
+| 发布 | `/odom` | `nav_msgs/msg/Odometry` |
+| 发布 | `/imu/data_raw` | `sensor_msgs/msg/Imu` |
+| 发布 | `/battery_state` | `sensor_msgs/msg/BatteryState` |
+| 发布 | `/diagnostics` | `diagnostic_msgs/msg/DiagnosticArray` |
+
+运行检查：
 
 ```bash
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.05}, angular: {z: 0.0}}"
+ros2 topic hz /odom
+ros2 topic echo /imu/data_raw --once
+ros2 topic echo /battery_state --once
+ros2 topic echo /diagnostics --once
+ros2 run tf2_ros tf2_echo odom base_footprint
 ```
 
-因为上位机看门狗为0.30秒，一次性命令只会产生短促动作。持续人工控制应使用键盘遥控，
-并保持物理急停人员在场。
+## STM32底盘现场测试
 
-## 工作区规划
+开始前必须完整阅读[底盘测试操作说明](tests/README.md)。测试工具支持：
+
+- 查找串口、监听反馈和连续发送停车帧；
+- 架空轮前进、后退、左转、右转；
+- 3 m 编码器距离测试；
+- 90°和 360°原地旋转测试；
+- 通信失联停车测试；
+- 不连接实车的伪 STM32 和协议单元测试。
+
+每次新测试会保存：
 
 ```text
-src/
-├── spore_patrol_base_driver   STM32串口协议、里程计、IMU、电池、诊断
-├── spore_patrol_description   机器人结构、URDF/Xacro、RViz
-├── spore_patrol_sim           Gazebo世界和仿真启动
-└── spore_patrol_bringup       系统一键启动与参数入口
-
-后续新增：
-├── spore_patrol_localization  轮速/IMU/RTK/SLAM融合
-├── spore_patrol_navigation    Nav2规划、控制和避障
-├── spore_patrol_coverage      田间覆盖路径
-└── spore_patrol_mission       采样任务状态机
+tests/results/时间_测试类型/
+├── metadata.json  命令参数、串口和开始时间
+├── summary.json   帧率、校验统计、结论、滑行或过转结果
+├── frames.csv     速度、原始IMU、SI单位IMU和电池逐帧数据
+└── raw.bin        未经处理的串口原始字节
 ```
+
+测试工具会自动发送停车帧，但不能替代人员看守的物理急停。
+
+## 固件说明
+
+- `_4WD_CAR` 是当前需要编译的 Keil 工程目标；
+- 高配摆式车型对应 `SENIOR_4WD_BS`、`MD36N_27`、`GMR_500` 和
+  `WheelDiameter_4WD_152`；
+- `SYSTEM/sys/sys.c` 中 `SecurityLevel=0`，启用串口命令丢失停车；
+- `CarType/4wd_robot_init.c` 已加入车型 ADC 越界保护和安全回退；
+- 修改后的固件源码只有重新编译并烧录后才会在实车生效。
+
+图纸几何参数用于 URDF 外观和碰撞体；固件中的半轮距、半轴距还包含厂家运动学经验值，
+不能仅按图纸直接覆盖，应使用重复直线和旋转实验标定。
+
+## 可视化材料
+
+系统总体方案：
+
+![系统总体方案](docs/system_architecture.svg)
+
+模型尺寸已经更新为高配摆式底盘。后续完成雷达安装和传感器位置测量后，再重新生成
+RViz、Gazebo 和导航界面截图。
 
 ## 安全原则
 
-- 真实底盘首次测试必须架空车轮；
-- 上位机速度指令中断约 1 秒后，STM32 必须强制停车；
-- 自动模式必须保留独立硬件急停；
-- 仿真参数不能直接视为实车标定结果；
-- 定位、路径、续航等比赛指标只使用真实可追溯数据。
+- 首次测试、重新烧录或修改驱动后必须先将四轮可靠架空；
+- 失联停车每次改动后必须重新实测，不能只根据源码判断；
+- 落地测试必须有人守住硬件急停或总电源；
+- 看门狗、软件停车和 `Ctrl+C` 不能替代独立硬件急停；
+- 未完成定位、避障和电子围栏验证前，不允许无人自动运行；
+- 仿真结果不能直接作为实车导航、定位、续航或安全指标；
+- 比赛数据必须保留命令参数、原始数据、视频和可追溯记录。

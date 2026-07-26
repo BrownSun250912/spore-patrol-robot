@@ -1,6 +1,7 @@
 """WHEELTEC STM32 velocity-command and status-frame protocol."""
 
 from dataclasses import dataclass
+import math
 import struct
 from typing import Iterable, List
 
@@ -9,6 +10,9 @@ FRAME_HEADER = 0x7B
 FRAME_TAIL = 0x7D
 COMMAND_FRAME_SIZE = 11
 STATUS_FRAME_SIZE = 24
+GRAVITY_MPS2 = 9.80665
+DEFAULT_ACCEL_LSB_PER_G = 16384.0
+DEFAULT_GYRO_LSB_PER_DEG_S = 65.5
 
 
 def bcc(data: Iterable[int]) -> int:
@@ -25,6 +29,28 @@ def _to_milli_s16(value: float, name: str) -> int:
     if not -32768 <= scaled <= 32767:
         raise ValueError(f"{name}={value} is outside signed 16-bit range")
     return scaled
+
+
+def accel_raw_to_mps2(
+    value: int,
+    lsb_per_g: float = DEFAULT_ACCEL_LSB_PER_G,
+) -> float:
+    """Convert one signed accelerometer count to m/s^2."""
+
+    if lsb_per_g <= 0.0:
+        raise ValueError("lsb_per_g must be positive")
+    return float(value) * GRAVITY_MPS2 / lsb_per_g
+
+
+def gyro_raw_to_radps(
+    value: int,
+    lsb_per_deg_s: float = DEFAULT_GYRO_LSB_PER_DEG_S,
+) -> float:
+    """Convert one signed gyroscope count to rad/s."""
+
+    if lsb_per_deg_s <= 0.0:
+        raise ValueError("lsb_per_deg_s must be positive")
+    return float(value) * math.pi / 180.0 / lsb_per_deg_s
 
 
 def build_command_frame(

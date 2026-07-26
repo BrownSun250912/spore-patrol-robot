@@ -32,7 +32,7 @@ tests/
 不连接小车即可运行，不需要安装第三方Python包：
 
 ```bash
-cd /media/brown/新加卷/STM32_Project/WHEELTEC_C50X_2026.05.29/spore_patrol_ws
+cd /media/brown/新加卷1/STM32_Project/WHEELTEC_C50X_2026.05.29/spore_patrol_ws
 python3 -m unittest -v tests/chassis_serial/test_protocol.py
 python3 tests/chassis_serial/chassis_serial_test.py selftest
 ```
@@ -82,7 +82,16 @@ python3 tests/chassis_serial/chassis_serial_test.py listen \
   --duration 10
 ```
 
-正常情况下应解析到约20 Hz的状态帧，并显示 `vx/vy/wz`、IMU和电池电压。结果自动保存到 `tests/results/日期_时间_listen/`。
+正常情况下应解析到约20 Hz的状态帧，并显示 `vx/vy/wz` 和电池电压。CSV同时保存
+IMU原始计数和转换后的SI单位值。结果自动保存到
+`tests/results/日期_时间_listen/`。
+
+每次测试目录还会生成：
+
+- `metadata.json`：命令参数、串口和开始时间；
+- `summary.json`：有效帧率、校验统计、测试结论及距离/转角结果；
+- `frames.csv`：逐帧解析数据；
+- `raw.bin`：未经处理的串口原始字节。
 
 ## 4. 主动发送停车帧
 
@@ -155,12 +164,13 @@ python3 tests/chassis_serial/chassis_serial_test.py distance \
   --arm OPEN_AREA_AND_EMERGENCY_STOP_READY
 ```
 
-这个命令保证的是“编码器合成里程达到3米”，不保证真实物理距离恰好为3米。测试前在
+这个命令保证的是“编码器合成里程达到3米”，不保证真实物理距离恰好为3米。脚本会
+继续积分停车后的滑行距离，并将目标时刻、稳定后距离和滑行量写入 `summary.json`。测试前在
 前轴中心位置贴起点标记，停车后测量前轴中心的实际终点，记录实际距离、横向偏移和
 车头偏角。按 `Ctrl+C` 时脚本会尝试发送停车帧，但物理急停人员仍必须在场。
 
-当前固件的失联停车尚未通过原始数据复核，因此本命令只能用于人工全程监管的低速标定，
-不能用于无人或远程测试。如果没有专人守急停，不得执行。
+当前固件已经完成一次失联停车测试，但每次修改或重新烧录固件后都必须复测。没有专人
+守急停时不得执行落地运动测试。
 
 ## 8. 原地旋转角度标定（仅限有人值守）
 
@@ -187,7 +197,8 @@ python3 tests/chassis_serial/chassis_serial_test.py rotate \
 ```
 
 右转时将 `--direction left` 改为 `--direction right`。脚本积分的是四轮编码器运动学
-计算的 `wz`，达到目标角度后主动停车；真实车身角度需要通过地面标记测量。四驱底盘
+计算的 `wz`，达到目标角度后主动停车；同时记录停车后的过转量和陀螺仪积分结果。真实
+车身角度仍需要通过地面标记测量。四驱底盘
 原地旋转会发生轮胎侧滑，因此编码器角度与实际角度的差值是有效轮距标定数据。
 
 旋转前至少清出以小车为中心、直径2米的无人区域，并处理好USB线缆余量，防止线缆在
@@ -213,9 +224,9 @@ python3 tests/chassis_serial/chassis_serial_test.py failsafe \
 如果静默期间车轮没有自动停止，判定当前固件失联停车不合格。立即停车，不要落地测试。
 如果开始静默前反馈尚未达到运动阈值，结果为 `INCONCLUSIVE`，不能记为通过。
 
-当前源码中 `SysVal.SecurityLevel=1` 会关闭串口命令丢失停车检查。如果现场测试得到
-`FAIL`，应先将安全等级配置和固件失联逻辑整改、重新烧录并复测，不能用脚本最后发送的
-恢复停车帧代替真正的失联停车。
+当前项目源码中 `SysVal.SecurityLevel=0`，会启用串口命令丢失停车检查。如果现场测试
+得到 `FAIL`，应立即停止落地测试，检查实际烧录固件、安全等级和命令丢失逻辑并复测。
+不能用脚本最后发送的恢复停车帧代替真正的失联停车。
 
 ## 10. 现场结束后
 

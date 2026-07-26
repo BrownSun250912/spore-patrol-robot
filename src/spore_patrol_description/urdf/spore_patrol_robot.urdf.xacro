@@ -1,17 +1,18 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="spore_patrol_robot">
   <!--
-    Provisional geometry from the STM32 firmware's TOP_4WD_BS variant.
-    Replace these values after measuring the actual chassis and payload.
+    WHEELTEC high-configuration pendulum-suspension chassis.
+    Dimensions are from docs/小车相关参数/小车二维模型图纸.jpg.
+    The payload and sensor mounting positions remain provisional.
   -->
-  <xacro:property name="half_track" value="0.311"/>
-  <xacro:property name="half_wheelbase" value="0.308"/>
-  <xacro:property name="wheel_radius" value="0.1125"/>
-  <xacro:property name="wheel_width" value="0.085"/>
-  <xacro:property name="chassis_length" value="0.72"/>
-  <xacro:property name="chassis_width" value="0.56"/>
-  <xacro:property name="chassis_height" value="0.12"/>
-  <xacro:property name="chassis_z" value="0.19"/>
+  <xacro:property name="half_track" value="0.1678"/>
+  <xacro:property name="half_wheelbase" value="0.15635"/>
+  <xacro:property name="wheel_radius" value="0.076"/>
+  <xacro:property name="wheel_width" value="0.048"/>
+  <xacro:property name="chassis_length" value="0.3127"/>
+  <xacro:property name="chassis_width" value="0.238"/>
+  <xacro:property name="chassis_height" value="0.09"/>
+  <xacro:property name="chassis_z" value="0.096"/>
 
   <material name="orange">
     <color rgba="0.96 0.45 0.08 1.0"/>
@@ -40,8 +41,8 @@
   <link name="base_link">
     <inertial>
       <origin xyz="0 0 0"/>
-      <mass value="35.0"/>
-      <inertia ixx="1.25" ixy="0" ixz="0" iyy="1.65" iyz="0" izz="2.30"/>
+      <mass value="7.6"/>
+      <inertia ixx="0.12" ixy="0" ixz="0" iyy="0.17" iyz="0" izz="0.23"/>
     </inertial>
     <visual>
       <geometry>
@@ -55,6 +56,13 @@
       </geometry>
     </collision>
   </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="imu_link"/>
 
   <xacro:macro name="fixed_wheel" params="name x y">
     <joint name="${name}_joint" type="fixed">
@@ -87,12 +95,12 @@
   <joint name="sensor_deck_joint" type="fixed">
     <parent link="base_link"/>
     <child link="sensor_deck"/>
-    <origin xyz="0 0 0.15"/>
+    <origin xyz="0 0 0.12"/>
   </joint>
   <link name="sensor_deck">
     <visual>
       <geometry>
-        <box size="0.58 0.44 0.045"/>
+        <box size="0.34 0.22 0.025"/>
       </geometry>
       <material name="silver"/>
     </visual>
