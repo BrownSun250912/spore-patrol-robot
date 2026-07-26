@@ -1,15 +1,4 @@
-"""WHEELTEC STM32 serial protocol helpers.
-
-The implementation mirrors the firmware in:
-
-- BALANCE/uartx_callback.c: 11-byte velocity command frame
-- BALANCE/data_task.c: 24-byte chassis status frame
-
-All multibyte values use signed, big-endian 16-bit integers. Velocity command
-values are represented in 0.001 SI-unit increments.
-"""
-
-from __future__ import annotations
+"""WHEELTEC STM32 velocity-command and status-frame protocol."""
 
 from dataclasses import dataclass
 import struct
@@ -23,7 +12,7 @@ STATUS_FRAME_SIZE = 24
 
 
 def bcc(data: Iterable[int]) -> int:
-    """Return the XOR/BCC used by the STM32 firmware."""
+    """Return the XOR/BCC byte used by the STM32 firmware."""
 
     value = 0
     for byte in data:
@@ -34,7 +23,7 @@ def bcc(data: Iterable[int]) -> int:
 def _to_milli_s16(value: float, name: str) -> int:
     scaled = int(round(value * 1000.0))
     if not -32768 <= scaled <= 32767:
-        raise ValueError(f"{name}={value} is outside signed 16-bit protocol range")
+        raise ValueError(f"{name}={value} is outside signed 16-bit range")
     return scaled
 
 
@@ -46,7 +35,7 @@ def build_command_frame(
     mode: int = 0,
     reserved: int = 0,
 ) -> bytes:
-    """Build an 11-byte STM32 velocity command frame."""
+    """Build one 11-byte body-velocity command frame."""
 
     if not 0 <= mode <= 0xFF:
         raise ValueError("mode must fit in one byte")
@@ -64,28 +53,33 @@ def build_command_frame(
     )
     frame.append(bcc(frame))
     frame.append(FRAME_TAIL)
-    if len(frame) != COMMAND_FRAME_SIZE:
-        raise AssertionError("unexpected command frame length")
     return bytes(frame)
 
 
 @dataclass(frozen=True)
 class StatusFrame:
+    """Decoded 24-byte chassis feedback frame.
+
+    Velocity and voltage fields are converted to SI units. Acceleration and
+    gyroscope fields remain signed sensor counts because the STM32 firmware
+    sends raw IMU values.
+    """
+
     flag_stop: int
     vx_mps: float
     vy_mps: float
     wz_radps: float
-    accel_x: float
-    accel_y: float
-    accel_z: float
-    gyro_x: float
-    gyro_y: float
-    gyro_z: float
+    accel_x_raw: int
+    accel_y_raw: int
+    accel_z_raw: int
+    gyro_x_raw: int
+    gyro_y_raw: int
+    gyro_z_raw: int
     battery_v: float
 
 
 def parse_status_frame(frame: bytes) -> StatusFrame:
-    """Validate and decode one 24-byte STM32 status frame."""
+    """Validate and decode one 24-byte status frame."""
 
     if len(frame) != STATUS_FRAME_SIZE:
         raise ValueError(f"status frame must be {STATUS_FRAME_SIZE} bytes")
@@ -97,24 +91,23 @@ def parse_status_frame(frame: bytes) -> StatusFrame:
         raise ValueError("invalid status frame BCC")
 
     values = struct.unpack(">hhhhhhhhhh", frame[2:22])
-    scaled = [value / 1000.0 for value in values]
     return StatusFrame(
         flag_stop=frame[1],
-        vx_mps=scaled[0],
-        vy_mps=scaled[1],
-        wz_radps=scaled[2],
-        accel_x=scaled[3],
-        accel_y=scaled[4],
-        accel_z=scaled[5],
-        gyro_x=scaled[6],
-        gyro_y=scaled[7],
-        gyro_z=scaled[8],
-        battery_v=scaled[9],
+        vx_mps=values[0] / 1000.0,
+        vy_mps=values[1] / 1000.0,
+        wz_radps=values[2] / 1000.0,
+        accel_x_raw=values[3],
+        accel_y_raw=values[4],
+        accel_z_raw=values[5],
+        gyro_x_raw=values[6],
+        gyro_y_raw=values[7],
+        gyro_z_raw=values[8],
+        battery_v=values[9] / 1000.0,
     )
 
 
 class StatusStreamDecoder:
-    """Recover valid 24-byte status frames from an arbitrary byte stream."""
+    """Recover valid status frames from an arbitrary serial byte stream."""
 
     def __init__(self) -> None:
         self._buffer = bytearray()

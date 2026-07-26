@@ -16,6 +16,7 @@
 
 - `spore_patrol_description`：C50X 四驱底盘简化 Xacro 模型；
 - `spore_patrol_sim`：简化农田世界、激光雷达和可移动机器人；
+- `spore_patrol_base_driver`：真实STM32串口底盘驱动、里程计、IMU、电池与诊断；
 - `spore_patrol_bringup`：统一演示启动入口；
 - `docs/system_architecture.svg`：汇报用系统架构图（同时提供 PNG）；
 - `docs/evening_brief.md`：阶段汇报提纲。
@@ -105,16 +106,50 @@ python3 -m unittest -v tests/chassis_serial/test_protocol.py
 python3 tests/chassis_serial/chassis_serial_test.py selftest
 ```
 
+## 真实底盘ROS 2驱动
+
+固件中 `SYSTEM/sys/sys.c` 的安全等级已经配置为0；重新编译并烧录4WD固件后，STM32会在
+连续丢失控制命令约1秒时清零目标速度。未重新烧录前，实车仍在运行旧固件，不能把源码
+修改视为安全功能已经生效。
+
+启动真实底盘、机器人模型和RViz：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch spore_patrol_bringup hardware.launch.py port:=/dev/ttyACM0
+```
+
+节点接口：
+
+- 订阅 `/cmd_vel`，默认限速 `0.15 m/s`、`0.30 rad/s`；
+- 发布 `/odom` 和动态 `odom -> base_footprint` TF；
+- 发布 `/imu/data_raw`，按固件的±2 g、±500°/s量程转换为ROS SI单位；
+- 发布 `/battery_state` 和 `/diagnostics`；
+- 上位机超过0.30秒没有收到新 `/cmd_vel` 时持续发送零速度；
+- 串口关闭、节点退出或按 `Ctrl+C` 时尝试连续发送停车帧。
+
+保持四轮架空时，可用一次性低速命令验证：
+
+```bash
+ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.05}, angular: {z: 0.0}}"
+```
+
+因为上位机看门狗为0.30秒，一次性命令只会产生短促动作。持续人工控制应使用键盘遥控，
+并保持物理急停人员在场。
+
 ## 工作区规划
 
 ```text
 src/
+├── spore_patrol_base_driver   STM32串口协议、里程计、IMU、电池、诊断
 ├── spore_patrol_description   机器人结构、URDF/Xacro、RViz
 ├── spore_patrol_sim           Gazebo世界和仿真启动
 └── spore_patrol_bringup       系统一键启动与参数入口
 
 后续新增：
-├── spore_patrol_base_driver   STM32串口/CAN协议
 ├── spore_patrol_localization  轮速/IMU/RTK/SLAM融合
 ├── spore_patrol_navigation    Nav2规划、控制和避障
 ├── spore_patrol_coverage      田间覆盖路径

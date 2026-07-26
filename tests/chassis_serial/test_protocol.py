@@ -7,7 +7,11 @@ import pty
 import struct
 import unittest
 
-from tests.chassis_serial.chassis_serial_test import LinuxSerialPort
+from tests.chassis_serial.chassis_serial_test import (
+    LinuxSerialPort,
+    require_safe_distance,
+    require_safe_rotation,
+)
 from tests.chassis_serial.protocol import (
     FRAME_HEADER,
     FRAME_TAIL,
@@ -82,6 +86,20 @@ class ProtocolTest(unittest.TestCase):
         finally:
             os.close(master_fd)
             os.close(slave_fd)
+
+    def test_distance_test_safety_limits(self) -> None:
+        require_safe_distance(3.0, 0.10)
+        with self.assertRaises(ValueError):
+            require_safe_distance(3.01, 0.10)
+        with self.assertRaises(ValueError):
+            require_safe_distance(3.0, 0.11)
+
+    def test_rotation_test_safety_limits(self) -> None:
+        require_safe_rotation(360.0, 0.15)
+        with self.assertRaises(ValueError):
+            require_safe_rotation(360.1, 0.15)
+        with self.assertRaises(ValueError):
+            require_safe_rotation(360.0, 0.30)
 
 
 if __name__ == "__main__":

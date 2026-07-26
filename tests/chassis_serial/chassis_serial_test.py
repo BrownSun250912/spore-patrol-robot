@@ -8,6 +8,7 @@ import csv
 from datetime import datetime
 import glob
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -30,9 +31,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_ROOT = REPO_ROOT / "tests" / "results"
 NORMAL_ARM_TEXT = "WHEELS_OFF_GROUND"
 FAILSAFE_ARM_TEXT = "WHEELS_OFF_GROUND_AND_EMERGENCY_STOP_READY"
+DISTANCE_ARM_TEXT = "OPEN_AREA_AND_EMERGENCY_STOP_READY"
 MAX_LINEAR_MPS = 0.15
 MAX_ANGULAR_RADPS = 0.30
 MAX_MOTION_DURATION_S = 5.0
+MAX_DISTANCE_M = 3.0
+MAX_DISTANCE_SPEED_MPS = 0.10
+MIN_DISTANCE_SPEED_MPS = 0.03
+MAX_ROTATION_ANGLE_DEG = 360.0
+MAX_ROTATION_SPEED_RADPS = 0.25
+MIN_ROTATION_SPEED_RADPS = 0.10
 
 
 BAUD_CONSTANTS = {
@@ -184,16 +192,35 @@ def serial_candidates() -> list[str]:
 
 def require_safe_motion(vx: float, vy: float, wz: float, duration: float) -> None:
     if abs(vx) > MAX_LINEAR_MPS or abs(vy) > MAX_LINEAR_MPS:
-        raise ValueError(
-            f"linear speed is limited to ±{MAX_LINEAR_MPS:.2f} m/s"
-        )
+        raise ValueError(f"linear speed is limited to ±{MAX_LINEAR_MPS:.2f} m/s")
     if abs(wz) > MAX_ANGULAR_RADPS:
-        raise ValueError(
-            f"angular speed is limited to ±{MAX_ANGULAR_RADPS:.2f} rad/s"
-        )
+        raise ValueError(f"angular speed is limited to ±{MAX_ANGULAR_RADPS:.2f} rad/s")
     if not 0 < duration <= MAX_MOTION_DURATION_S:
         raise ValueError(
             f"motion duration must be within (0, {MAX_MOTION_DURATION_S:.1f}] s"
+        )
+
+
+def require_safe_distance(distance: float, speed: float) -> None:
+    if not 0 < distance <= MAX_DISTANCE_M:
+        raise ValueError(f"distance must be within (0, {MAX_DISTANCE_M:.1f}] m")
+    if not MIN_DISTANCE_SPEED_MPS <= speed <= MAX_DISTANCE_SPEED_MPS:
+        raise ValueError(
+            "distance-test speed must be within "
+            f"[{MIN_DISTANCE_SPEED_MPS:.2f}, {MAX_DISTANCE_SPEED_MPS:.2f}] m/s"
+        )
+
+
+def require_safe_rotation(angle_deg: float, speed_radps: float) -> None:
+    if not 0 < angle_deg <= MAX_ROTATION_ANGLE_DEG:
+        raise ValueError(
+            f"rotation angle must be within (0, {MAX_ROTATION_ANGLE_DEG:.0f}] deg"
+        )
+    if not MIN_ROTATION_SPEED_RADPS <= speed_radps <= MAX_ROTATION_SPEED_RADPS:
+        raise ValueError(
+            "rotation-test speed must be within "
+            f"[{MIN_ROTATION_SPEED_RADPS:.2f}, "
+            f"{MAX_ROTATION_SPEED_RADPS:.2f}] rad/s"
         )
 
 
@@ -383,42 +410,289 @@ def command_sequence(args: argparse.Namespace) -> None:
     with_port_and_capture(args, "sequence", operation)
 
 
+def command_distance(args: argparse.Namespace) -> None:
+    if args.arm != DISTANCE_ARM_TEXT:
+        raise SystemExit(f"Refusing distance test: pass --arm {DISTANCE_ARM_TEXT}")
+    require_safe_distance(args.distance, args.speed)
+
+    def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+        send_stop_burst(port)
+        drain_feedback(port, capture, 0.5, print_interval=0.5)
+        if capture.latest is None:
+            raise ValueError("no valid chassis feedback during preflight")
+        if capture.latest.flag_stop != 0:
+            raise ValueError(
+                f"chassis reports stop={capture.latest.flag_stop}; "
+                "release the motor enable/emergency stop before this test"
+            )
+
+        print(
+            f"Distance test: target={args.distance:.3f} m, "
+            f"speed={args.speed:.3f} m/s"
+        )
+        print(
+            "This stops at encoder-integrated distance, not tape-measure distance. "
+            "Keep a person at the physical emergency stop."
+        )
+        for remaining in (3, 2, 1):
+            print(f"Starting in {remaining}...")
+            time.sleep(1.0)
+
+        frame = build_command_frame(args.speed, 0.0, 0.0)
+        period = 1.0 / 20.0
+        estimated_duration = args.distance / args.speed
+        deadline = time.monotonic() + min(
+            90.0,
+            max(15.0, estimated_duration * 1.5 + 10.0),
+        )
+        next_send = time.monotonic()
+        next_print = time.monotonic()
+        last_feedback_wall = time.monotonic()
+        last_frame_elapsed: Optional[float] = None
+        integrated_distance = 0.0
+
+        try:
+            while integrated_distance < args.distance:
+                now = time.monotonic()
+                if now >= deadline:
+                    raise TimeoutError(
+                        "distance test timed out before reaching the target"
+                    )
+                if now >= next_send:
+                    port.write(frame)
+                    next_send = now + period
+
+                rows = capture.feed(port.read(timeout=min(0.02, period)))
+                if rows:
+                    last_feedback_wall = time.monotonic()
+                    for elapsed, status in rows:
+                        if status.flag_stop != 0:
+                            raise ValueError(
+                                f"chassis changed to stop={status.flag_stop} "
+                                "during the distance test"
+                            )
+                        if last_frame_elapsed is not None:
+                            dt = elapsed - last_frame_elapsed
+                            if 0 < dt <= 0.25:
+                                integrated_distance += max(0.0, status.vx_mps) * dt
+                        last_frame_elapsed = elapsed
+
+                    now = time.monotonic()
+                    if now >= next_print:
+                        status = rows[-1][1]
+                        print(
+                            f"distance={integrated_distance:.3f}/"
+                            f"{args.distance:.3f}m "
+                            f"vx={status.vx_mps:+.3f} "
+                            f"wz={status.wz_radps:+.3f}"
+                        )
+                        next_print = now + 0.5
+
+                if time.monotonic() - last_feedback_wall > 0.5:
+                    raise TimeoutError(
+                        "lost chassis feedback for more than 0.5 s"
+                    )
+        finally:
+            send_stop_burst(port)
+            drain_feedback(port, capture, 0.8, print_interval=0.4)
+            print("Distance-test stop burst sent.")
+
+        print(
+            f"Encoder-integrated target reached: {integrated_distance:.3f} m. "
+            "Measure the physical start-to-stop distance now."
+        )
+
+    with_port_and_capture(args, "distance", operation)
+
+
+def command_rotate(args: argparse.Namespace) -> None:
+    if args.arm != DISTANCE_ARM_TEXT:
+        raise SystemExit(f"Refusing rotation test: pass --arm {DISTANCE_ARM_TEXT}")
+    require_safe_rotation(args.angle, args.speed)
+    direction_sign = 1.0 if args.direction == "left" else -1.0
+    target_angle_rad = math.radians(args.angle)
+    commanded_wz = direction_sign * args.speed
+
+    def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+        send_stop_burst(port)
+        drain_feedback(port, capture, 0.5, print_interval=0.5)
+        if capture.latest is None:
+            raise ValueError("no valid chassis feedback during preflight")
+        if capture.latest.flag_stop != 0:
+            raise ValueError(
+                f"chassis reports stop={capture.latest.flag_stop}; "
+                "release the motor enable/emergency stop before this test"
+            )
+
+        print(
+            f"Rotation test: direction={args.direction}, "
+            f"target={args.angle:.1f} deg, speed={args.speed:.3f} rad/s"
+        )
+        print(
+            "This stops at wheel-odometry-integrated angle, not measured physical "
+            "heading. Keep a person at the physical emergency stop."
+        )
+        for remaining in (3, 2, 1):
+            print(f"Starting in {remaining}...")
+            time.sleep(1.0)
+
+        frame = build_command_frame(0.0, 0.0, commanded_wz)
+        period = 1.0 / 20.0
+        estimated_duration = target_angle_rad / args.speed
+        deadline = time.monotonic() + min(
+            90.0,
+            max(15.0, estimated_duration * 1.5 + 10.0),
+        )
+        next_send = time.monotonic()
+        next_print = time.monotonic()
+        last_feedback_wall = time.monotonic()
+        last_frame_elapsed: Optional[float] = None
+        integrated_angle_rad = 0.0
+
+        try:
+            while integrated_angle_rad < target_angle_rad:
+                now = time.monotonic()
+                if now >= deadline:
+                    raise TimeoutError(
+                        "rotation test timed out before reaching the target angle"
+                    )
+                if now >= next_send:
+                    port.write(frame)
+                    next_send = now + period
+
+                rows = capture.feed(port.read(timeout=min(0.02, period)))
+                if rows:
+                    last_feedback_wall = time.monotonic()
+                    for elapsed, status in rows:
+                        if status.flag_stop != 0:
+                            raise ValueError(
+                                f"chassis changed to stop={status.flag_stop} "
+                                "during the rotation test"
+                            )
+                        if last_frame_elapsed is not None:
+                            dt = elapsed - last_frame_elapsed
+                            if 0 < dt <= 0.25:
+                                signed_wz = direction_sign * status.wz_radps
+                                integrated_angle_rad += max(0.0, signed_wz) * dt
+                        last_frame_elapsed = elapsed
+
+                    now = time.monotonic()
+                    if now >= next_print:
+                        status = rows[-1][1]
+                        print(
+                            f"angle={math.degrees(integrated_angle_rad):.1f}/"
+                            f"{args.angle:.1f}deg "
+                            f"wz={status.wz_radps:+.3f}"
+                        )
+                        next_print = now + 0.5
+
+                if time.monotonic() - last_feedback_wall > 0.5:
+                    raise TimeoutError(
+                        "lost chassis feedback for more than 0.5 s"
+                    )
+        finally:
+            send_stop_burst(port)
+            drain_feedback(port, capture, 0.8, print_interval=0.4)
+            print("Rotation-test stop burst sent.")
+
+        print(
+            "Wheel-odometry target reached: "
+            f"{math.degrees(integrated_angle_rad):.1f} deg. "
+            "Measure the physical final heading now."
+        )
+
+    with_port_and_capture(args, "rotate", operation)
+
+
 def command_failsafe(args: argparse.Namespace) -> None:
     if args.arm != FAILSAFE_ARM_TEXT:
         raise SystemExit(f"Refusing failsafe test: pass --arm {FAILSAFE_ARM_TEXT}")
 
     def operation(port: LinuxSerialPort, capture: CaptureSession) -> None:
+        drive_duration = 2.0
+        silence_duration = 2.0
+        moving_vx_threshold = 0.015
+        stopped_vx_threshold = 0.01
+        stopped_wz_threshold = 0.02
+        required_stopped_frames = 3
         silence_started = 0.0
+        silence_capture_started = 0.0
         stopped_after: Optional[float] = None
+        stop_candidate_after: Optional[float] = None
+        stopped_frame_count = 0
+        motion_confirmed = False
         try:
-            print("Sending +0.03 m/s for 1.0 s...")
-            run_velocity(port, capture, 0.03, 0.0, 0.0, 1.0)
-            print("COMMAND SILENCE for 2.0 s; no stop frame is being sent.")
+            print(f"Sending +0.03 m/s for {drive_duration:.1f} s...")
+            run_velocity(port, capture, 0.03, 0.0, 0.0, drive_duration)
+            moving_status = capture.latest
+            motion_confirmed = (
+                moving_status is not None
+                and moving_status.flag_stop == 0
+                and abs(moving_status.vx_mps) >= moving_vx_threshold
+            )
+            if moving_status is None:
+                print("PRECONDITION FAILED: no feedback before command silence.")
+            else:
+                print(
+                    "Pre-silence feedback: "
+                    f"stop={moving_status.flag_stop} "
+                    f"vx={moving_status.vx_mps:+.3f} "
+                    f"wz={moving_status.wz_radps:+.3f}"
+                )
+            print(
+                f"COMMAND SILENCE for {silence_duration:.1f} s; "
+                "no stop frame is being sent."
+            )
             silence_started = time.monotonic()
-            deadline = silence_started + 2.0
+            silence_capture_started = capture.elapsed
+            deadline = silence_started + silence_duration
+            next_print = silence_started
             while time.monotonic() < deadline:
                 rows = capture.feed(port.read(timeout=0.05))
-                for _, status in rows:
-                    if (
-                        stopped_after is None
-                        and abs(status.vx_mps) < 0.01
-                        and abs(status.wz_radps) < 0.02
-                    ):
-                        stopped_after = time.monotonic() - silence_started
-                if rows:
+                for elapsed, status in rows:
+                    sample_after = max(0.0, elapsed - silence_capture_started)
+                    is_stopped = (
+                        abs(status.vx_mps) < stopped_vx_threshold
+                        and abs(status.wz_radps) < stopped_wz_threshold
+                    )
+                    if is_stopped:
+                        if stopped_frame_count == 0:
+                            stop_candidate_after = sample_after
+                        stopped_frame_count += 1
+                        if (
+                            stopped_after is None
+                            and stopped_frame_count >= required_stopped_frames
+                        ):
+                            stopped_after = stop_candidate_after
+                    else:
+                        stopped_frame_count = 0
+                        stop_candidate_after = None
+                now = time.monotonic()
+                if rows and now >= next_print:
                     print_status(rows[-1][1], capture.frame_rate)
+                    next_print = now + 0.25
         finally:
             send_stop_burst(port)
             drain_feedback(port, capture, 0.5)
             print("Recovery stop burst sent.")
 
-        if stopped_after is None:
+        if not motion_confirmed:
             print(
-                "FAIL/INCONCLUSIVE: feedback did not fall below the stop threshold "
-                "during the 2.0 s command silence."
+                "INCONCLUSIVE: the chassis was not confirmed moving before "
+                f"command silence (requires |vx| >= {moving_vx_threshold:.3f} m/s "
+                "with stop=0)."
+            )
+        elif stopped_after is None:
+            print(
+                "FAIL: after confirmed motion, feedback did not remain below the "
+                f"stop threshold for {required_stopped_frames} consecutive frames "
+                f"during the {silence_duration:.1f} s command silence."
             )
         else:
-            print(f"Observed near-zero feedback after {stopped_after:.3f} s.")
+            print(
+                "Observed stable near-zero feedback "
+                f"after {stopped_after:.3f} s."
+            )
             if stopped_after <= 1.2:
                 print("PASS candidate: verify the wheel video before accepting.")
             else:
@@ -477,6 +751,31 @@ def build_parser() -> argparse.ArgumentParser:
     add_serial_arguments(sequence)
     sequence.add_argument("--arm", default="")
     sequence.set_defaults(func=command_sequence)
+
+    distance = subparsers.add_parser(
+        "distance",
+        help="drive straight until encoder-integrated distance reaches a target",
+    )
+    add_serial_arguments(distance)
+    distance.add_argument("--distance", type=float, default=3.0)
+    distance.add_argument("--speed", type=float, default=0.10)
+    distance.add_argument("--arm", default="")
+    distance.set_defaults(func=command_distance)
+
+    rotate = subparsers.add_parser(
+        "rotate",
+        help="rotate until wheel-odometry-integrated yaw reaches a target",
+    )
+    add_serial_arguments(rotate)
+    rotate.add_argument("--angle", type=float, default=360.0)
+    rotate.add_argument("--speed", type=float, default=0.15)
+    rotate.add_argument(
+        "--direction",
+        choices=("left", "right"),
+        default="left",
+    )
+    rotate.add_argument("--arm", default="")
+    rotate.set_defaults(func=command_rotate)
 
     failsafe = subparsers.add_parser(
         "failsafe", help="test automatic stop after command silence"
