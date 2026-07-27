@@ -4,10 +4,10 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    - Alpha: 0.45
-      Cell Size: 1
+    - Alpha: 0.55
+      Cell Size: 0.5
       Class: rviz_default_plugins/Grid
-      Color: 120; 130; 120
+      Color: 110; 120; 110
       Enabled: true
       Name: Ground Grid
       Plane: XY
@@ -17,20 +17,12 @@ Visualization Manager:
       Description Topic:
         Value: /robot_description
       Enabled: true
-      Name: C50X Spore Patrol Robot
+      Name: Spore Patrol Robot
       Visual Enabled: true
       Collision Enabled: false
-    - Class: rviz_default_plugins/TF
-      Enabled: true
-      Frame Timeout: 15
-      Marker Scale: 0.35
-      Name: Coordinate Frames
-      Show Arrows: true
-      Show Axes: true
-      Show Names: true
     - Class: rviz_default_plugins/LaserScan
       Enabled: true
-      Name: LiDAR /scan
+      Name: YDLIDAR X3 Pro
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -40,9 +32,18 @@ Visualization Manager:
       Size (Pixels): 3
       Style: Flat Squares
       Color: 255; 80; 30
+      Decay Time: 0
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Marker Scale: 0.25
+      Name: Coordinate Frames
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
   Global Options:
     Background Color: 24; 30; 34
-    Fixed Frame: odom
+    Fixed Frame: world
     Frame Rate: 30
   Name: root
   Tools:
@@ -54,12 +55,12 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.6
+      Distance: 5.0
       Focal Point:
         X: 0
         Y: 0
-        Z: 0.25
-      Pitch: 0.55
+        Z: 0.2
+      Pitch: 0.75
       Yaw: 0.75
 Window Geometry:
   Height: 900

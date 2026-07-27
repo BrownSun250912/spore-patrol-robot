@@ -532,7 +532,12 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.send_final_stop()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        # ros2 launch can deliver another SIGINT while shutdown is already in
+        # progress. Keep cleanup best-effort and avoid a misleading traceback.
+        try:
+            node.send_final_stop()
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        except KeyboardInterrupt:
+            pass

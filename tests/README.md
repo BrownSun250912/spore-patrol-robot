@@ -32,7 +32,7 @@ tests/
 不连接小车即可运行，不需要安装第三方Python包：
 
 ```bash
-cd /media/brown/新加卷1/STM32_Project/WHEELTEC_C50X_2026.05.29/spore_patrol_ws
+cd ~/spore_patrol_ws
 python3 -m unittest -v tests/chassis_serial/test_protocol.py
 python3 tests/chassis_serial/chassis_serial_test.py selftest
 ```

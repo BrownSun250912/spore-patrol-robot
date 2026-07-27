@@ -1,0 +1,38 @@
+ydlidar_ros2_driver_node:
+  ros__parameters:
+    # The launch file can override the port, reversion and inverted values.
+    port: /dev/ydlidar
+    frame_id: laser_link
+    ignore_array: ""
+
+    # Official X3/X3 Pro communication properties.
+    baudrate: 115200
+    lidar_type: 1
+    device_type: 0
+    isSingleChannel: true
+    intensity: false
+    intensity_bit: 0
+    sample_rate: 3
+
+    abnormal_check_count: 4
+    fixed_resolution: true
+    auto_reconnect: true
+
+    # The original CP210x adapter can control the X3 motor through DTR.
+    support_motor_dtr: true
+
+    # Calibrated with a box at the physical front-left of this installation.
+    reversion: true
+    inverted: true
+
+    angle_min: -180.0
+    angle_max: 180.0
+    range_min: 0.12
+    range_max: 8.0
+
+    # The adapter controls the real motor rate. This is the initial expected
+    # rate and must be checked against /scan after connecting the sensor.
+    frequency: 5.0
+
+    invalid_range_is_inf: true
+    debug: false
