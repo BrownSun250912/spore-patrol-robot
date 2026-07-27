@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.8)
-project(spore_patrol_description)
+project(spore_patrol_slam)
 
 find_package(ament_cmake REQUIRED)
 
 install(
-  DIRECTORY launch meshes rviz urdf
+  DIRECTORY config launch rviz
   DESTINATION share/${PROJECT_NAME}
 )
 

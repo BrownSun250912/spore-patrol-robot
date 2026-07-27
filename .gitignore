@@ -3,9 +3,11 @@ install/
 log/
 .colcon/
 .vscode/
+.vendor/
 *.pyc
 __pycache__/
 *.bag
 *.db3
+src/ydlidar_ros2_driver/
 tests/results/*
 !tests/results/.gitkeep
