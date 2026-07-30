@@ -6,6 +6,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 import xacro
 
 
@@ -27,6 +28,7 @@ def generate_launch_description():
     lidar_port = LaunchConfiguration("lidar_port")
     use_lidar = LaunchConfiguration("lidar")
     use_rviz = LaunchConfiguration("rviz")
+    base_publish_tf = LaunchConfiguration("base_publish_tf")
 
     return LaunchDescription(
         [
@@ -50,6 +52,14 @@ def generate_launch_description():
                 default_value="/dev/ydlidar",
                 description="YDLIDAR CP210x serial device.",
             ),
+            DeclareLaunchArgument(
+                "base_publish_tf",
+                default_value="true",
+                description=(
+                    "Publish odom to base_footprint from the base driver. "
+                    "Set false when robot_localization owns that TF."
+                ),
+            ),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -63,7 +73,13 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     str(driver_share / "config" / "base_driver.yaml"),
-                    {"port": port},
+                    {
+                        "port": port,
+                        "publish_tf": ParameterValue(
+                            base_publish_tf,
+                            value_type=bool,
+                        ),
+                    },
                 ],
             ),
             Node(
@@ -85,6 +101,10 @@ def generate_launch_description():
                     "-d",
                     str(description_share / "rviz" / "model.rviz"),
                 ],
+                # Prefer Mesa on this hybrid-graphics laptop. Otherwise RViz
+                # may select an unavailable NVIDIA GLX provider and fail to
+                # create its OpenGL context.
+                additional_env={"__GLX_VENDOR_LIBRARY_NAME": "mesa"},
                 condition=IfCondition(use_rviz),
                 output="screen",
             ),
