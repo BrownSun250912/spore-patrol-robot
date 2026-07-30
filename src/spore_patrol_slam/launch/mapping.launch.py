@@ -2,7 +2,11 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    IncludeLaunchDescription,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -25,6 +29,7 @@ def generate_launch_description():
     slam_params_file = LaunchConfiguration("slam_params_file")
     use_rviz = LaunchConfiguration("rviz")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    base_publish_tf = LaunchConfiguration("base_publish_tf")
 
     return LaunchDescription(
         [
@@ -53,16 +58,37 @@ def generate_launch_description():
                 default_value="false",
                 description="Use simulation clock instead of the host clock.",
             ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    str(bringup_share / "launch" / "hardware.launch.py")
+            DeclareLaunchArgument(
+                "base_publish_tf",
+                default_value="true",
+                description=(
+                    "Publish raw base TF. Set false when the local EKF "
+                    "owns it."
                 ),
-                launch_arguments={
-                    "port": base_port,
-                    "lidar": "true",
-                    "lidar_port": lidar_port,
-                    "rviz": "false",
-                }.items(),
+            ),
+            # hardware.launch.py also declares an argument named "rviz".
+            # Keep its forced false value inside a scoped group so it cannot
+            # overwrite the outer mapping rviz argument.
+            GroupAction(
+                scoped=True,
+                actions=[
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            str(
+                                bringup_share
+                                / "launch"
+                                / "hardware.launch.py"
+                            )
+                        ),
+                        launch_arguments={
+                            "port": base_port,
+                            "lidar": "true",
+                            "lidar_port": lidar_port,
+                            "rviz": "false",
+                            "base_publish_tf": base_publish_tf,
+                        }.items(),
+                    )
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
@@ -86,6 +112,11 @@ def generate_launch_description():
                     "-d",
                     str(package_share / "rviz" / "mapping.rviz"),
                 ],
+                # This hybrid-graphics laptop can expose an unavailable
+                # NVIDIA GLX vendor after a kernel update. Prefer Mesa for
+                # RViz so Intel acceleration, or llvmpipe as a fallback, is
+                # selected instead of crashing during context creation.
+                additional_env={"__GLX_VENDOR_LIBRARY_NAME": "mesa"},
                 condition=IfCondition(use_rviz),
                 output="screen",
             ),

@@ -1,0 +1,61 @@
+imu_bias_calibrator:
+  ros__parameters:
+    input_topic: /imu/data_raw
+    output_topic: /imu/data_calibrated
+    calibration_duration: 10.0
+    minimum_samples: 100
+    motion_threshold: 0.03
+
+
+ekf_local_filter_node:
+  ros__parameters:
+    # Continuous local odometry for a planar skid-steer chassis.
+    frequency: 20.0
+    sensor_timeout: 0.20
+    two_d_mode: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.10
+    print_diagnostics: true
+    debug: false
+    publish_tf: true
+    publish_acceleration: false
+    reset_on_time_jump: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: odom
+
+    # The STM32 odometry pose is integrated from the same velocity fields.
+    # Fuse velocity only, avoiding duplicate use of one wheel measurement.
+    # The measured zero lateral velocity constrains this skid-steer chassis.
+    odom0: /odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, false,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_nodelay: true
+    odom0_differential: false
+    odom0_relative: false
+
+    # Subtract the stationary startup gyro bias before fusing yaw rate.
+    # The STM32 protocol has no valid orientation quaternion or magnetometer;
+    # accelerometer vibration and gravity remain deliberately excluded.
+    imu0: /imu/data_calibrated
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 20
+    imu0_nodelay: true
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: false
+
+    use_control: false
+    dynamic_process_noise_covariance: false
+    predict_to_current_time: false
+    smooth_lagged_data: false

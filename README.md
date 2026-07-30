@@ -33,7 +33,9 @@
 - YDLIDAR X3 Pro 官方驱动、固定版本 SDK、ROS 2 启动和自动数据检查；
 - X3 Pro 实物 USB/CP210x 通信、`/scan`、TF、方向和 RViz 联调；
 - 底盘、雷达、机器人模型和 RViz 的统一实车启动入口；
-- SLAM Toolbox 异步建图配置、专用 RViz、录包和地图保存工具。
+- SLAM Toolbox 异步建图配置、专用 RViz、录包和地图保存工具；
+- `spore_patrol_localization` 本地 EKF 配置和组合启动入口，使用轮速平移与
+  ICM20948 偏航角速度，并自动保证 TF 只有一个发布者。
 
 当前实测基线：
 
@@ -48,7 +50,7 @@
 - X3 Pro 长时间稳定性、室外强光和植株环境数据评估；
 - 第一张室内二维地图、回环效果和重复建图误差评估；
 - 北斗 RTK、航向和 CORS/NTRIP 链路；
-- `robot_localization` 轮速、IMU、RTK/SLAM 融合；
+- 本地 EKF 实车验证，以及 CMP10A、GNSS 和 SLAM 的全局融合；
 - Nav2 静态地图定位、规划和动态避障；
 - 田间往复式覆盖路径和电子围栏；
 - “到点—停车—采样—确认—继续”任务状态机；
@@ -63,8 +65,9 @@ spore_patrol_ws/
 │   ├── spore_patrol_description  高配摆式底盘URDF/Xacro和RViz配置
 │   ├── spore_patrol_lidar        YDLIDAR X3 Pro参数、启动和RViz配置
 │   ├── spore_patrol_slam         SLAM Toolbox建图参数、启动和RViz配置
+│   ├── spore_patrol_localization  轮速和ICM20948本地EKF融合
 │   ├── spore_patrol_sim          Gazebo农田世界及激光雷达仿真
-│   └── spore_patrol_bringup      仿真和实车统一启动入口
+│   └── spore_patrol_bringup      仿真、原始实车和融合实车启动入口
 ├── tests/
 │   ├── chassis_serial            不依赖ROS运行时的底盘测试程序
 │   ├── lidar                     雷达端口、数据质量和方向检查程序
@@ -79,7 +82,6 @@ spore_patrol_ws/
 后续计划增加：
 
 ```text
-spore_patrol_localization  轮速、IMU、RTK和SLAM融合
 spore_patrol_navigation    Nav2规划、控制与避障
 spore_patrol_coverage      田间覆盖路径
 spore_patrol_mission       采样任务状态机
@@ -100,9 +102,10 @@ spore_patrol_mission       采样任务状态机
 ```bash
 cd ~/spore_patrol_ws
 source /opt/ros/humble/setup.bash
+sudo apt-get install -y ros-humble-robot-localization
 tools/setup_ydlidar_dependencies.sh
 source tools/ydlidar_env.sh
-colcon build --symlink-install --packages-up-to spore_patrol_slam
+colcon build --symlink-install --packages-up-to spore_patrol_localization
 source install/setup.bash
 ```
 
@@ -235,7 +238,7 @@ tools/save_slam_map.sh indoor_01
 ```
 
 完整步骤、验收标准和故障判断见
-[室内二维建图操作说明](docs/室内二维建图.md)。
+[ICM20948融合与室内二维建图操作指南](docs/室内二维建图.md)。
 
 ## 真实底盘ROS 2驱动
 
@@ -295,6 +298,43 @@ ros2 topic echo /battery_state --once
 ros2 topic echo /diagnostics --once
 ros2 run tf2_ros tf2_echo odom base_footprint
 ```
+
+## 本地轮速和 ICM20948 融合
+
+[`spore_patrol_localization`](src/spore_patrol_localization/README.md) 使用二维 EKF：
+
+- `/odom` 只提供车体前向速度和零横向速度；
+- `/imu/data_raw` 保留 STM32 原始 ICM20948 数据；
+- `/imu/data_calibrated` 是启动静止10秒后完成零偏补偿的角速度，供 EKF 使用；
+- `/odometry/filtered` 提供融合后的本地里程计；
+- EKF 是唯一的 `odom -> base_footprint` TF 发布者。
+
+实车启动：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch spore_patrol_localization hardware_localization.launch.py \
+  port:=/dev/ttyACM0 \
+  lidar:=false \
+  rviz:=true
+```
+
+检查：
+
+```bash
+ros2 topic hz /imu/data_raw
+ros2 topic hz /imu/data_calibrated
+ros2 topic hz /odometry/filtered
+ros2 run tf2_ros tf2_echo odom base_footprint
+```
+
+启动后必须保持小车完全静止10秒，看到终端输出 `Gyro bias calibration complete` 后再运动。
+组合启动会把底盘驱动的 `publish_tf` 设为 `false`，避免与 EKF 重复发布动态 TF。
+不能同时运行原始 `hardware.launch.py` 和融合启动文件，因为两个进程都会尝试打开
+同一个 STM32 串口。CMP10A 后续使用独立坐标系和绝对航向话题接入，不与 ICM20948
+作为同等角速度源直接重复融合。
 
 ## STM32底盘现场测试
 

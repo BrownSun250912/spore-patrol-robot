@@ -27,9 +27,11 @@ exec ros2 bag record \
   --output "${bag_directory}" \
   /scan \
   /odom \
+  /odometry/filtered \
   /tf \
   /tf_static \
   /imu/data_raw \
+  /imu/data_calibrated \
   /battery_state \
   /diagnostics \
   /cmd_vel \
