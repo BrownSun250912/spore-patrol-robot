@@ -1,0 +1,4 @@
+# 覆盖仓库根 .gitignore 的 build/ 规则，保留 web 自身 build 源码
+!build/
+build/*
+!build/sites-vite-plugin.ts
