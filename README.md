@@ -73,6 +73,18 @@ spore_patrol_coverage      田间覆盖路径
 spore_patrol_mission       采样任务状态机
 ```
 
+## Web 控制台（`web/`）
+
+仓库 `web/` 目录下是配套的**多模态农田孢子监测 Web 控制台**（Next.js 单页应用），
+面向竞赛要求，与机器人项目整合了以下能力：
+
+- **SLAM 地图导入**：`.pgm + .yaml` 解析为路径规划底图，比例尺按分辨率自动换算；
+- **rosbridge 实时监控**：订阅 `/odom`、`/scan` 实时展示位姿与雷达点云，远程发送 `/cmd_vel`；
+- **轨迹导出回放**：实时轨迹叠加、导出 JSON/GeoJSON、导入回放动画。
+
+详细接入方式与接手指南见 [web/README.md](web/README.md)，开发日志见
+[docs/dev_log/dev_log_miobarnacle.md](docs/dev_log/dev_log_miobarnacle.md)。
+
 ## 环境
 
 - Ubuntu 22.04
